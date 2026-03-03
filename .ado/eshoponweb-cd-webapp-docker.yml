@@ -6,10 +6,10 @@ resources:
       trigger: none
 
 variables:
-  azureServiceConnection: 'azure subs'
-  resourceGroup: 'rg-az400-container-NAME'
-  location: 'centralus'
-  subscriptionId: 'YOUR-SUBSCRIPTION-ID'
+  azureServiceConnection: 'Tema-sc'
+  resourceGroup: 'Eshop-wus-rg'
+  location: 'westus'
+  subscriptionId: '24e9df87-f699-49ca-ad4e-eaf026d4fbf8'
 
 stages:
 - stage: Deploy
