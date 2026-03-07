@@ -119,7 +119,7 @@ stages:
     - task: SonarCloudPrepare@1
       displayName: 'SonarCloud prepare'
       inputs:
-        SonarCloud: 'SonarCloudConnection'
+        SonarCloud: '$(SONARCLOUDCONNECTION)'
         organization: '$(SONARCLOUD_ORG)'
         scannerMode: MSBuild
         projectKey: 'eShopOnWeb'
@@ -152,7 +152,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Lint Bicep templates'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
@@ -168,7 +168,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Validate Bicep against Azure Policy'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
@@ -275,7 +275,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Scan image with Trivy'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
