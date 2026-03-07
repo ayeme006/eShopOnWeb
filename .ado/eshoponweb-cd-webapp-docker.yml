@@ -20,11 +20,10 @@ resources:
       trigger: none
 
 variables:
-  azureServiceConnection: 'Tema-sc'
-  resourceGroup: 'Eshop-wus-rg'
-  location: 'westus'
-  subscriptionId: '24e9df87-f699-49ca-ad4e-eaf026d4fbf8'
-  registry: 'eshoponwebacr'
+  # Reference variable groups from Azure DevOps (linked to Key Vault)
+  - group: Common-Secrets
+  - group: Build-Config
+  - group: Deployment-Config
 
 stages:
 
@@ -38,12 +37,12 @@ stages:
     - task: AzureCLI@2
       displayName: 'Deploy Key Vault'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           az deployment group create \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --template-file infra/keyvault.bicep \
             --parameters infra/keyvault.parameters.json \
             --output json
@@ -51,12 +50,12 @@ stages:
     - task: AzureCLI@2
       displayName: 'Deploy Application Insights & Log Analytics'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           az deployment group create \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --template-file infra/appinsights.bicep \
             --parameters infra/appinsights.parameters.json \
             --output json
@@ -64,12 +63,12 @@ stages:
     - task: AzureCLI@2
       displayName: 'Validate policy compliance'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           az security assessment list \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --query "[].{Name:displayName, Status:status.code}" \
             --output table
 
@@ -89,11 +88,11 @@ stages:
       displayName: 'Deploy App Service (Development)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-docker.bicep'
         csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
@@ -103,11 +102,11 @@ stages:
       displayName: 'Add role assignment (Dev)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
         deploymentMode: 'Incremental'
@@ -115,7 +114,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Smoke test (Development)'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
@@ -126,13 +125,13 @@ stages:
     - task: AzureCLI@2
       displayName: 'Enable monitoring & diagnostics'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           # Enable Application Insights monitoring
           az webapp config appsettings set \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --name $(appServiceName) \
             --settings APPINSIGHTS_INSTRUMENTATIONKEY=$(appInsightsKey)
 
@@ -164,11 +163,11 @@ stages:
       displayName: 'Deploy App Service (Staging)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-docker.bicep'
         csmParametersFile: 'infra/webapp-docker-stg.parameters.json'
@@ -178,11 +177,11 @@ stages:
       displayName: 'Add role assignment (Staging)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
         deploymentMode: 'Incremental'
@@ -190,13 +189,13 @@ stages:
     - task: AzureCLI@2
       displayName: 'Security scan (Staging)'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           # Run Defender assessment
           az security assessment list \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --query "[?name.contains(@, 'Staging')]" \
             --output table || true
           echo "Security assessment completed"
@@ -204,7 +203,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Smoke test (Staging)'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
@@ -243,11 +242,11 @@ stages:
       displayName: 'Deploy App Service (Production)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-docker.bicep'
         csmParametersFile: 'infra/webapp-docker-prod.parameters.json'
@@ -257,11 +256,11 @@ stages:
       displayName: 'Add role assignment (Production)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
         deploymentMode: 'Incremental'
@@ -269,7 +268,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Health check (Production)'
       inputs:
-        azureSubscription: $(azureServiceConnection)
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |

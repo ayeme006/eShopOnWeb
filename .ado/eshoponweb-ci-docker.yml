@@ -28,12 +28,11 @@ resources:
       trigger: none
 
 variables:
-  azureServiceConnection: 'Tema-sc'
-  subscriptionId: '24e9df87-f699-49ca-ad4e-eaf026d4fbf8'
-  resourceGroup: 'Eshop-wus-rg'
-  location: 'westus'
-  registry: 'eshoponwebacr'
-  DOTNET_VERSION: '8.0.x'
+  # Reference variable groups from Azure DevOps (linked to Key Vault)
+  - group: Common-Secrets
+  - group: Build-Config
+  - group: Deployment-Config
+  # Local overrides (if needed)
   canary.isPreRelease: $[ne(variables['Build.SourceBranch'], 'refs/heads/main')]
 
 stages:
@@ -223,11 +222,11 @@ stages:
       displayName: 'Deploy ACR using Bicep (if needed)'
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(azureServiceConnection)
-        subscriptionId: $(subscriptionId)
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
         action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(resourceGroup)'
-        location: '$(location)'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
         templateLocation: 'Linked artifact'
         csmFile: 'infra/acr.bicep'
         deploymentMode: 'Incremental'
@@ -238,8 +237,8 @@ stages:
       inputs:
         targetType: inline
         script: |
-          $var = ConvertFrom-Json '$(outputJson)'
-          $acrServer = $var.acrLoginServer.value
+          # Get ACR login server from service connection
+          $acrServer = "$(REGISTRY).azurecr.io"
           Write-Host "##vso[task.setvariable variable=acrLoginServer;]$acrServer"
           Write-Host "ACR Server: $acrServer"
 
@@ -247,9 +246,9 @@ stages:
       displayName: 'Build Docker image'
       inputs:
         command: build
-        repository: 'eshoponweb/web'
+        repository: '$(IMAGE_REPO)'
         dockerfile: 'src/Web/Dockerfile'
-        containerRegistry: '$(registry)'
+        containerRegistry: '$(REGISTRY)'
         tags: |
           $(Build.BuildId)
           latest
@@ -258,8 +257,8 @@ stages:
       displayName: 'Push Docker image to ACR'
       inputs:
         command: push
-        repository: 'eshoponweb/web'
-        containerRegistry: '$(registry)'
+        repository: '$(IMAGE_REPO)'
+        containerRegistry: '$(REGISTRY)'
         tags: |
           $(Build.BuildId)
           latest
