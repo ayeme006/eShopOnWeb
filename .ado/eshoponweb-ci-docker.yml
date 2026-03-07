@@ -54,7 +54,7 @@ stages:
       inputs:
         command: restore
         # projects: '**/*.csproj'
-        projects: '**/*.sln'
+        projects: 'eShopOnWeb.sln'
         feedsToUse: 'select'
 
     - task: DotNetCoreCLI@2
@@ -62,7 +62,7 @@ stages:
       inputs:
         command: build
         # projects: '**/*.csproj'
-        projects: '**/*.sln'
+        projects: 'eShopOnWeb.sln'
         arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
 
     - task: PublishBuildArtifacts@1
