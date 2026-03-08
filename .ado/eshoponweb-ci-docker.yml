@@ -233,36 +233,34 @@ stages:
         deploymentMode: 'Incremental'
         deploymentOutputs: 'outputJson'
 
-    - task: PowerShell@2
-      displayName: 'Parse ACR login server'
+    - task: AzureCLI@2
+      displayName: 'Build and push Docker image to ACR'
       inputs:
-        targetType: inline
-        script: |
-          # Get ACR login server from service connection
-          $acrServer = "$(REGISTRY).azurecr.io"
-          Write-Host "##vso[task.setvariable variable=acrLoginServer;]$acrServer"
-          Write-Host "ACR Server: $acrServer"
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
 
-    - task: Docker@2
-      displayName: 'Build Docker image'
-      inputs:
-        command: build
-        repository: '$(IMAGE_REPO)'
-        dockerfile: 'src/Web/Dockerfile'
-        containerRegistry: '$(REGISTRY)'
-        tags: |
-          $(Build.BuildId)
-          latest
+          ACR_NAME="$(REGISTRY)"
+          ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO)"
 
-    - task: Docker@2
-      displayName: 'Push Docker image to ACR'
-      inputs:
-        command: push
-        repository: '$(IMAGE_REPO)'
-        containerRegistry: '$(REGISTRY)'
-        tags: |
-          $(Build.BuildId)
-          latest
+          echo "Logging into ACR ${ACR_NAME}..."
+          az acr login --name "$ACR_NAME"
+
+          echo "Building image ${IMAGE_PATH}:$(Build.BuildId)..."
+          docker build -f src/Web/Dockerfile \
+            -t "${IMAGE_PATH}:$(Build.BuildId)" \
+            -t "${IMAGE_PATH}:latest" \
+            .
+
+          echo "Pushing image tags..."
+          docker push "${IMAGE_PATH}:$(Build.BuildId)"
+          docker push "${IMAGE_PATH}:latest"
+
+          echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
+          echo "Pushed ${IMAGE_PATH}:$(Build.BuildId) and latest"
 
 - stage: Image_Scanning
   displayName: Container Image Vulnerability Scan
