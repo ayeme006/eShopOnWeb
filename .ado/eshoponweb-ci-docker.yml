@@ -54,7 +54,7 @@ stages:
       inputs:
         command: restore
         projects: '**/*.sln'
-
+# This is a test
     - task: DotNetCoreCLI@2
       displayName: 'Build solution'
       inputs:
