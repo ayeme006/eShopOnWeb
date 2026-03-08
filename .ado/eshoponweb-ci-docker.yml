@@ -33,7 +33,8 @@ variables:
   - group: Build-Config
   - group: Deployment-Config
   # Local overrides (if needed)
-  canary.isPreRelease: $[ne(variables['Build.SourceBranch'], 'refs/heads/main')]
+  - name: canary.isPreRelease
+    value: $[ne(variables['Build.SourceBranch'], 'refs/heads/main')]
 
 stages:
 
@@ -174,7 +175,7 @@ stages:
         inlineScript: |
           # Run what-if to validate compliance
           az deployment group what-if \
-            --resource-group $(resourceGroup) \
+            --resource-group $(RESOURCE_GROUP) \
             --template-file infra/main.bicep \
             --parameters infra/main.parameters.json \
             || echo "Policy validation warnings (non-blocking)"
