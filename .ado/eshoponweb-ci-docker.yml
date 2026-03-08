@@ -35,7 +35,7 @@ variables:
   # Local overrides (if needed)
   - name: canary.isPreRelease
     value: $[ne(variables['Build.SourceBranch'], 'refs/heads/main')]
-
+ 
 stages:
 
 - stage: Restore_and_Build
@@ -123,8 +123,8 @@ stages:
         SonarCloud: '$(SONARCLOUDCONNECTION)'
         organization: '$(SONARCLOUD_ORG)'
         scannerMode: MSBuild
-        projectKey: 'eShopOnWeb'
-        projectName: 'eShopOnWeb'
+        projectKey: '$(SONARCLOUD_PROJECT_KEY)'
+        projectName: '$(SONARCLOUD_PROJECT_NAME)'
 
     - task: DotNetCoreCLI@2
       displayName: 'Build for analysis'
