@@ -49,17 +49,18 @@ stages:
       inputs:
         version: $(DOTNET_VERSION)
 
-    - task: CmdLine@2
+    - task: DotNetCoreCLI@2
       displayName: 'Restore packages'
       inputs:
-        script: 'dotnet restore eShopOnWeb.sln'
-      workingDirectory: '$(Build.SourcesDirectory)'
+        command: restore
+        projects: '**/*.sln'
 
-    - task: CmdLine@2
+    - task: DotNetCoreCLI@2
       displayName: 'Build solution'
       inputs:
-        script: 'dotnet build eShopOnWeb.sln --configuration Release /p:ContinuousIntegrationBuild=true'
-      workingDirectory: '$(Build.SourcesDirectory)'
+        command: build
+        projects: '**/*.sln'
+        arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
 
     - task: PublishBuildArtifacts@1
       displayName: 'Publish build artifacts'
