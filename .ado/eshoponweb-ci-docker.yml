@@ -122,7 +122,7 @@ stages:
       inputs:
         SonarCloud: '$(SONARCLOUDCONNECTION)'
         organization: '$(SONARCLOUD_ORG)'
-        scannerMode: MSBuild
+        scannerMode: "dotnet"
         projectKey: '$(SONARCLOUD_PROJECT_KEY)'
         projectName: '$(SONARCLOUD_PROJECT_NAME)'
 
@@ -136,18 +136,16 @@ stages:
     - task: SonarCloudAnalyze@3
       displayName: 'SonarCloud analyze'
 
-<<<<<<< HEAD
     - task: SonarCloudPublish@3
-=======
     # Give the API a few seconds to register the task before publishing
-    - bash: sleep 20
+    - bash: sleep 15
       displayName: 'Wait for API processing'
 
-    - task: SonarCloudPublish@1
->>>>>>> bb71f8e5eef1bdc6243dac5dbca5b66e837c529d
+    - task: SonarCloudPublish@3
       displayName: 'Publish SonarCloud results'
       inputs:
         pollingTimeoutSec: '300'
+
 
 - stage: Infra_Validation
   displayName: IaC Linting & Policy Check
