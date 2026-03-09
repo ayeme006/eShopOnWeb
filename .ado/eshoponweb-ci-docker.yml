@@ -136,6 +136,10 @@ stages:
     - task: SonarCloudAnalyze@1
       displayName: 'SonarCloud analyze'
 
+    # Give the API a few seconds to register the task before publishing
+    - bash: sleep 20
+      displayName: 'Wait for API processing'
+
     - task: SonarCloudPublish@1
       displayName: 'Publish SonarCloud results'
       inputs:
