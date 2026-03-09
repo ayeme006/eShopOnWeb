@@ -117,7 +117,7 @@ stages:
       inputs:
         version: $(DOTNET_VERSION)
 
-    - task: SonarCloudPrepare@1
+    - task: SonarCloudPrepare@3
       displayName: 'SonarCloud prepare'
       inputs:
         SonarCloud: '$(SONARCLOUDCONNECTION)'
@@ -133,10 +133,10 @@ stages:
         projects: '**/*.csproj'
         arguments: '--configuration Release'
 
-    - task: SonarCloudAnalyze@1
+    - task: SonarCloudAnalyze@3
       displayName: 'SonarCloud analyze'
 
-    - task: SonarCloudPublish@1
+    - task: SonarCloudPublish@3
       displayName: 'Publish SonarCloud results'
       inputs:
         pollingTimeoutSec: '300'
