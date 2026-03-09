@@ -211,7 +211,16 @@ stages:
         script: |
           set -euo pipefail
           mkdir -p reports
-          ./dependency-check/bin/dependency-check.sh --project eShopOnWeb --scan src --format JSON --out reports/
+          if [ -z "$(NVDAPIKEY)" ]; then
+            echo "NVDAPIKEY is not set. Add it as a secret variable in your variable group."
+            exit 1
+          fi
+          ./dependency-check/bin/dependency-check.sh \
+            --project eShopOnWeb \
+            --scan src \
+            --format JSON \
+            --out reports/ \
+            --nvdApiKey "$(NVDAPIKEY)"
           cat reports/dependency-check-report.json
 
     - task: PublishBuildArtifacts@1
