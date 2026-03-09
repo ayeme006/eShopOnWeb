@@ -199,14 +199,19 @@ stages:
       displayName: 'Install OWASP Dependency-Check'
       inputs:
         script: |
-          curl -sL https://github.com/jeremylong/DependencyCheck_Action/releases/download/v1.0.0/dependency-check.sh -o dependency-check.sh
-          chmod +x dependency-check.sh
+          set -euo pipefail
+          DC_VERSION="12.1.0"
+          curl -sSL "https://github.com/jeremylong/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip" -o dependency-check.zip
+          unzip -q dependency-check.zip
+          chmod +x dependency-check/bin/dependency-check.sh
 
     - task: CmdLine@2
       displayName: 'Scan NuGet dependencies'
       inputs:
         script: |
-          ./dependency-check.sh --project eShopOnWeb --scan src --format JSON --out reports/
+          set -euo pipefail
+          mkdir -p reports
+          ./dependency-check/bin/dependency-check.sh --project eShopOnWeb --scan src --format JSON --out reports/
           cat reports/dependency-check-report.json
 
     - task: PublishBuildArtifacts@1
