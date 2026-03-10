@@ -195,6 +195,14 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - task: Cache@2
+      displayName: 'Cache Dependency-Check NVD data'
+      inputs:
+        key: 'dependency-check | "$(Agent.OS)" | "12.1.0"'
+        restoreKeys: |
+          dependency-check | "$(Agent.OS)"
+        path: '$(Pipeline.Workspace)/dependency-check-data'
+
     - task: CmdLine@2
       displayName: 'Install OWASP Dependency-Check'
       inputs:
@@ -211,8 +219,10 @@ stages:
         script: |
           set -euo pipefail
           mkdir -p reports
-          if [ -z "$(NVDAPIKEY)" ]; then
-            echo "NVDAPIKEY is not set. Add it as a secret variable in your variable group."
+          mkdir -p "$(Pipeline.Workspace)/dependency-check-data"
+          chmod -R 700 "$(Pipeline.Workspace)/dependency-check-data"
+          if [ -z "$MY_NVD_KEY" ]; then
+            echo "MY_NVD_KEY is not set. Add it as a secret variable in your variable group."
             exit 1
           fi
           ./dependency-check/bin/dependency-check.sh \
@@ -220,8 +230,12 @@ stages:
             --scan src \
             --format JSON \
             --out reports/ \
-            --nvdApiKey "$(NVDAPIKEY)"
+            --data "$(Pipeline.Workspace)/dependency-check-data" \
+            --nvdApiKey "$MY_NVD_KEY" \
+            --disableOssIndex
           cat reports/dependency-check-report.json
+      env:
+        MY_NVD_KEY: $(NVDAPIKEY) # Maps the Key Vault secret to a shell variable
 
     - task: PublishBuildArtifacts@1
       displayName: 'Publish scan results'
