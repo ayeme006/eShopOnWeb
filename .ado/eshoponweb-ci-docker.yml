@@ -277,7 +277,34 @@ stages:
           set -euo pipefail
 
           ACR_NAME="$(REGISTRY)"
-          ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          RESOURCE_GROUP="$(RESOURCE_GROUP)"
+
+          echo "Checking for ACR: $ACR_NAME..."
+          
+          # Wait for ACR to become visible  (DNS/ARM sync) 
+          for i in {1..5}; do
+            if az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+              echo "Found ACR '$ACR_NAME'."
+              break
+            fi
+            echo "ACR not visible yet. Waiting 15s (Attempt $i/5)..."
+            sleep 15
+          done
+
+          # 2. Fallback to listing if the specific name still isn't found
+          if ! az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+            echo "Configured ACR '$ACR_NAME' not found. Using first ACR in resource group $RESOURCE_GROUP..."
+            ACR_NAME=$(az acr list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+            echo "No Azure Container Registry found in resource group $RESOURCE_GROUP."
+            exit 1
+          fi
+
+          # 3. Get Login Server and Login
+          ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query "loginServer" -o tsv)
+
           IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO)"
 
           echo "Logging into ACR ${ACR_NAME}..."
