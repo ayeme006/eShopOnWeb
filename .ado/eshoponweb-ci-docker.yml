@@ -339,17 +339,35 @@ stages:
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
-          # Install Trivy
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee -a /etc/apt/sources.list.d/trivy.list
-          apt-get update && apt-get install -y trivy
-          
-          # Scan the image (fail on CRITICAL/HIGH)
-          trivy image --severity CRITICAL,HIGH \
+          set -euo pipefail
+
+          ACR_NAME="$(REGISTRY)"
+          if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
+            ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+            echo "No Azure Container Registry found in resource group $(RESOURCE_GROUP)."
+            exit 1
+          fi
+
+          ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
+          IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
+
+          # Generate a temporary token for the private registry
+          export TRIVY_PASSWORD=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+          export TRIVY_USERNAME="00000000-0000-0000-0000-000000000000" # Standard ID for ACR Token auth
+
+          TRIVY_VERSION="0.60.0"
+          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o trivy.tar.gz
+          tar -xzf trivy.tar.gz trivy
+          chmod +x ./trivy
+
+          ./trivy image --severity CRITICAL,HIGH \
             --exit-code 0 \
             --format json \
             --output trivy-report.json \
-            $(acrLoginServer)/eshoponweb/web:$(Build.BuildId)
+            "$IMAGE_PATH"
           
           cat trivy-report.json
 
