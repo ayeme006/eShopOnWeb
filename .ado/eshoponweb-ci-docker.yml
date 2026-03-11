@@ -354,12 +354,19 @@ stages:
           ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
           IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
 
-          # Generate a temporary token for the private registry
+          # Get a scoped access token specifically for registry actions
+          echo "Exchanging refresh token for access token..."
+          USER_TOKEN=$(az account get-access-token --query accessToken -o tsv)
           export TRIVY_PASSWORD=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+          # If the above still gives the "Refresh Token" warning, use this fallback:
+          # export TRIVY_PASSWORD=$(az acr token create --name trivy-scan --registry "$ACR_NAME" --repository "$(IMAGE_REPO)" --permissions pull --query "credentials.passwords[0].value" -o tsv)
           export TRIVY_USERNAME="00000000-0000-0000-0000-000000000000" # Standard ID for ACR Token auth
 
           TRIVY_VERSION="0.60.0"
-          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o trivy.tar.gz
+          TRIVY_URL="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "Downloading Trivy from ${TRIVY_URL}..."
+          curl --fail --retry 3 --retry-delay 5 -sSL "$TRIVY_URL" -o trivy.tar.gz
+          file trivy.tar.gz
           tar -xzf trivy.tar.gz trivy
           chmod +x ./trivy
 
