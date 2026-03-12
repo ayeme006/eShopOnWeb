@@ -66,6 +66,7 @@ stages:
         deploymentOutputs: 'appInsightsOutputs' # Saves outputs as a JSON string
 
     - task: PowerShell@2
+      name: setAppInsightsVars
       displayName: 'Set App Insights outputs as pipeline variables'
       inputs:
         targetType: 'inline'
@@ -78,11 +79,31 @@ stages:
           }
 
           try {
-            $outputs = $raw | ConvertFrom-Json
+            $parsed = $raw | ConvertFrom-Json
           }
           catch {
             Write-Error 'Failed to parse appInsightsOutputs JSON.'
             throw
+          }
+
+          # ARM task output shape can be either:
+          # 1) { outputName: { type, value }, ... }
+          # 2) { properties: { outputs... } }
+          if ($null -ne $parsed.properties) {
+            $outputs = $parsed.properties
+          }
+          else {
+            $outputs = $parsed
+          }
+
+          if ($null -eq $outputs.logAnalyticsWorkspaceId -or [string]::IsNullOrWhiteSpace([string]$outputs.logAnalyticsWorkspaceId.value)) {
+            Write-Error 'Required output logAnalyticsWorkspaceId was not found in appInsightsOutputs.'
+            exit 1
+          }
+
+          if ($null -eq $outputs.appInsightsConnectionString -or [string]::IsNullOrWhiteSpace([string]$outputs.appInsightsConnectionString.value)) {
+            Write-Error 'Required output appInsightsConnectionString was not found in appInsightsOutputs.'
+            exit 1
           }
 
           $sensitiveNamePattern = '(?i)(secret|password|token|key|connectionstring|instrumentationkey)'
@@ -108,6 +129,8 @@ stages:
               Write-Host "##vso[task.setvariable variable=$name;isOutput=true]$value"
             }
           }
+
+          Write-Host 'Verified required outputs and published pipeline variables: logAnalyticsWorkspaceId, appInsightsConnectionString'
       env:
         APPINSIGHTS_OUTPUTS: $(appInsightsOutputs)
     
@@ -126,8 +149,8 @@ stages:
         # csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
         deploymentMode: 'Incremental'
         overrideParameters: >
-          -appInsightsConnectionString "$(appInsightsConnectionString)"
-          -logAnalyticsWorkspaceId "$(logAnalyticsWorkspaceId)"
+          -appInsightsConnectionString "$(setAppInsightsVars.appInsightsConnectionString)"
+          -logAnalyticsWorkspaceId "$(setAppInsightsVars.logAnalyticsWorkspaceId)"
     
 
 
