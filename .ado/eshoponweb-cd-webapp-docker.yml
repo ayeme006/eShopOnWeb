@@ -34,31 +34,116 @@ stages:
     pool:
       vmImage: ubuntu-latest
     steps:
-    - task: AzureCLI@2
-      displayName: 'Deploy Key Vault'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          az deployment group create \
-            --resource-group $(RESOURCE_GROUP) \
-            --template-file infra/keyvault.bicep \
-            --parameters infra/keyvault.parameters.json \
-            --output json
+    # - task: AzureCLI@2
+    #   displayName: 'Deploy Key Vault'
+    #   inputs:
+    #     azureSubscription: $(AZURE_SERVICE_CONNECTION)
+    #     scriptType: bash
+    #     scriptLocation: inlineScript
+    #     inlineScript: |
+    #       az deployment group create \
+    #         --resource-group $(RESOURCE_GROUP) \
+    #         --template-file infra/keyvault.bicep \
+    #         --parameters infra/keyvault.parameters.json \
+    #         --output json
 
-    - task: AzureCLI@2
-      displayName: 'Deploy Application Insights & Log Analytics'
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Deploy Application Insights'
       inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          az deployment group create \
-            --resource-group $(RESOURCE_GROUP) \
-            --template-file infra/appinsights.bicep \
-            --parameters infra/appinsights.parameters.json \
-            --output json
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: '$(AZURE_SERVICE_CONNECTION)'
+        subscriptionId: '$(SUBSCRIPTION_ID)'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
+        templateLocation: 'Linked artifact'
+        csmFile: 'infra/appinsights.bicep' # Path to your file
+        overrideParameters: >
+          -logAnalyticsWorkspaceName "$(LAW_NAME)"
+          -applicationInsightsName "$(APP_INSIGHTS_NAME)"
+          -dailyDataCapInGb 1
+        deploymentMode: 'Incremental'
+        deploymentOutputs: 'appInsightsOutputs' # Saves outputs as a JSON string
+
+    - task: PowerShell@2
+      displayName: 'Set App Insights outputs as pipeline variables'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $raw = $env:APPINSIGHTS_OUTPUTS
+
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Error 'appInsightsOutputs is empty. Ensure deploymentOutputs is configured on the ARM deployment task.'
+            exit 1
+          }
+
+          try {
+            $outputs = $raw | ConvertFrom-Json
+          }
+          catch {
+            Write-Error 'Failed to parse appInsightsOutputs JSON.'
+            throw
+          }
+
+          $sensitiveNamePattern = '(?i)(secret|password|token|key|connectionstring|instrumentationkey)'
+          $properties = $outputs.PSObject.Properties
+          foreach ($property in $properties) {
+            $name = $property.Name
+            $node = $property.Value
+
+            if ($null -ne $node.value) {
+              $value = [string]$node.value
+            }
+            else {
+              $value = [string]$node
+            }
+
+            Write-Host "Setting variable $name"
+            $isSensitive = $name -match $sensitiveNamePattern
+            if ($isSensitive) {
+              Write-Host "Variable $name marked as secret output."
+              Write-Host "##vso[task.setvariable variable=$name;isOutput=true;issecret=true]$value"
+            }
+            else {
+              Write-Host "##vso[task.setvariable variable=$name;isOutput=true]$value"
+            }
+          }
+      env:
+        APPINSIGHTS_OUTPUTS: $(appInsightsOutputs)
+    
+    
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Deploy App Service (Development)'
+      inputs:
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
+        templateLocation: 'Linked artifact'
+        csmFile: 'infra/webapp-docker.bicep'
+        # csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
+        deploymentMode: 'Incremental'
+        overrideParameters: >
+          -appInsightsConnectionString "$(appInsightsConnectionString)"
+          -logAnalyticsWorkspaceId "$(logAnalyticsWorkspaceId)"
+    
+
+
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Add role assignment (Dev)'
+      retryCountOnTaskFailure: 2
+      inputs:
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+        subscriptionId: $(SUBSCRIPTION_ID)
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
+        templateLocation: 'Linked artifact'
+        csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
+        deploymentMode: 'Incremental'
 
     - task: AzureCLI@2
       displayName: 'Validate policy compliance'
@@ -72,222 +157,225 @@ stages:
             --query "[].{Name:displayName, Status:status.code}" \
             --output table
 
-- stage: Deploy_Development
-  displayName: Deploy to Development
-  dependsOn: Deploy_Infrastructure
-  condition: succeeded()
-  jobs:
-  - job: DeployDev
-    pool:
-      vmImage: ubuntu-latest
-    variables:
-      environment: 'development'
-      appServiceName: 'eshop-wus-dev-web'
-    steps:
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Deploy App Service (Development)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-docker.bicep'
-        csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
-        deploymentMode: 'Incremental'
+# - stage: Deploy_Development
+#   displayName: Deploy to Development
+#   dependsOn: Deploy_Infrastructure
+#   condition: succeeded()
+#   jobs:
+#   - job: DeployDev
+#     pool:
+#       vmImage: ubuntu-latest
+#     variables:
+#       environment: 'development'
+#       appServiceName: 'eshop-wus-dev-web'
+#     steps:
 
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Add role assignment (Dev)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
-        deploymentMode: 'Incremental'
 
-    - task: AzureCLI@2
-      displayName: 'Smoke test (Development)'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          sleep 30
-          curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
-          echo "Development environment health check passed"
+      # - task: AzureResourceManagerTemplateDeployment@3
+      # displayName: 'Deploy App Service (Development)'
+      # inputs:
+      #   deploymentScope: 'Resource Group'
+      #   azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+      #   subscriptionId: $(SUBSCRIPTION_ID)
+      #   action: 'Create Or Update Resource Group'
+      #   resourceGroupName: '$(RESOURCE_GROUP)'
+      #   location: '$(LOCATION)'
+      #   templateLocation: 'Linked artifact'
+      #   csmFile: 'infra/webapp-docker.bicep'
+      #   csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
+      #   deploymentMode: 'Incremental'
 
-    - task: AzureCLI@2
-      displayName: 'Enable monitoring & diagnostics'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          # Enable Application Insights monitoring
-          az webapp config appsettings set \
-            --resource-group $(RESOURCE_GROUP) \
-            --name $(appServiceName) \
-            --settings APPINSIGHTS_INSTRUMENTATIONKEY=$(appInsightsKey)
 
-- stage: Deploy_Staging
-  displayName: Deploy to Staging
-  dependsOn: Deploy_Development
-  condition: succeeded()
-  variables:
-    environment: 'staging'
-    appServiceName: 'eshop-wus-stg-web'
-  jobs:
-  - job: waitForValidation
-    pool: server
-    timeoutInMinutes: 1440
-    steps:
-    - task: ManualValidation@0
-      displayName: 'Manual approval for Staging'
-      inputs:
-        notifyUsers: 'team@example.com'
-        instructions: 'Please review and approve deployment to Staging'
+#     - task: AzureResourceManagerTemplateDeployment@3
+#       displayName: 'Add role assignment (Dev)'
+#       inputs:
+#         deploymentScope: 'Resource Group'
+#         azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#         subscriptionId: $(SUBSCRIPTION_ID)
+#         action: 'Create Or Update Resource Group'
+#         resourceGroupName: '$(RESOURCE_GROUP)'
+#         location: '$(LOCATION)'
+#         templateLocation: 'Linked artifact'
+#         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
+#         deploymentMode: 'Incremental'
 
-  - job: DeployStaging
-    dependsOn: waitForValidation
-    condition: succeeded()
-    pool:
-      vmImage: ubuntu-latest
-    steps:
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Deploy App Service (Staging)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-docker.bicep'
-        csmParametersFile: 'infra/webapp-docker-stg.parameters.json'
-        deploymentMode: 'Incremental'
+#     - task: AzureCLI@2
+#       displayName: 'Smoke test (Development)'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           sleep 30
+#           curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
+#           echo "Development environment health check passed"
 
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Add role assignment (Staging)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
-        deploymentMode: 'Incremental'
+#     - task: AzureCLI@2
+#       displayName: 'Enable monitoring & diagnostics'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           # Enable Application Insights monitoring
+#           az webapp config appsettings set \
+#             --resource-group $(RESOURCE_GROUP) \
+#             --name $(appServiceName) \
+#             --settings APPINSIGHTS_INSTRUMENTATIONKEY=$(appInsightsKey)
 
-    - task: AzureCLI@2
-      displayName: 'Security scan (Staging)'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          # Run Defender assessment
-          az security assessment list \
-            --resource-group $(RESOURCE_GROUP) \
-            --query "[?name.contains(@, 'Staging')]" \
-            --output table || true
-          echo "Security assessment completed"
+# - stage: Deploy_Staging
+#   displayName: Deploy to Staging
+#   dependsOn: Deploy_Development
+#   condition: succeeded()
+#   variables:
+#     environment: 'staging'
+#     appServiceName: 'eshop-wus-stg-web'
+#   jobs:
+#   - job: waitForValidation
+#     pool: server
+#     timeoutInMinutes: 1440
+#     steps:
+#     - task: ManualValidation@0
+#       displayName: 'Manual approval for Staging'
+#       inputs:
+#         notifyUsers: 'team@example.com'
+#         instructions: 'Please review and approve deployment to Staging'
 
-    - task: AzureCLI@2
-      displayName: 'Smoke test (Staging)'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          sleep 30
-          curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
-          echo "Staging environment health check passed"
+#   - job: DeployStaging
+#     dependsOn: waitForValidation
+#     condition: succeeded()
+#     pool:
+#       vmImage: ubuntu-latest
+#     steps:
+#     - task: AzureResourceManagerTemplateDeployment@3
+#       displayName: 'Deploy App Service (Staging)'
+#       inputs:
+#         deploymentScope: 'Resource Group'
+#         azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#         subscriptionId: $(SUBSCRIPTION_ID)
+#         action: 'Create Or Update Resource Group'
+#         resourceGroupName: '$(RESOURCE_GROUP)'
+#         location: '$(LOCATION)'
+#         templateLocation: 'Linked artifact'
+#         csmFile: 'infra/webapp-docker.bicep'
+#         csmParametersFile: 'infra/webapp-docker-stg.parameters.json'
+#         deploymentMode: 'Incremental'
 
-- stage: Deploy_Production
-  displayName: Deploy to Production
-  dependsOn: Deploy_Staging
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  variables:
-    environment: 'production'
-    appServiceName: 'eshop-wus-prod-web'
-  jobs:
-  - job: waitForProdValidation
-    pool: server
-    timeoutInMinutes: 1440
-    steps:
-    - task: ManualValidation@0
-      displayName: 'APPROVAL REQUIRED: Production Deployment'
-      inputs:
-        notifyUsers: 'prodteam@example.com'
-        instructions: |
-          This deployment is for PRODUCTION.
-          Please review staging results and approve for production release.
-          Deployment will proceed in 24 hours if not approved.
+#     - task: AzureResourceManagerTemplateDeployment@3
+#       displayName: 'Add role assignment (Staging)'
+#       inputs:
+#         deploymentScope: 'Resource Group'
+#         azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#         subscriptionId: $(SUBSCRIPTION_ID)
+#         action: 'Create Or Update Resource Group'
+#         resourceGroupName: '$(RESOURCE_GROUP)'
+#         location: '$(LOCATION)'
+#         templateLocation: 'Linked artifact'
+#         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
+#         deploymentMode: 'Incremental'
 
-  - job: DeployProduction
-    dependsOn: waitForProdValidation
-    condition: succeeded()
-    pool:
-      vmImage: ubuntu-latest
-    steps:
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Deploy App Service (Production)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-docker.bicep'
-        csmParametersFile: 'infra/webapp-docker-prod.parameters.json'
-        deploymentMode: 'Incremental'
+#     - task: AzureCLI@2
+#       displayName: 'Security scan (Staging)'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           # Run Defender assessment
+#           az security assessment list \
+#             --resource-group $(RESOURCE_GROUP) \
+#             --query "[?name.contains(@, 'Staging')]" \
+#             --output table || true
+#           echo "Security assessment completed"
 
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Add role assignment (Production)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
-        deploymentMode: 'Incremental'
+#     - task: AzureCLI@2
+#       displayName: 'Smoke test (Staging)'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           sleep 30
+#           curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
+#           echo "Staging environment health check passed"
 
-    - task: AzureCLI@2
-      displayName: 'Health check (Production)'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          sleep 30
-          curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
-          echo "Production environment health check passed"
+# - stage: Deploy_Production
+#   displayName: Deploy to Production
+#   dependsOn: Deploy_Staging
+#   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#   variables:
+#     environment: 'production'
+#     appServiceName: 'eshop-wus-prod-web'
+#   jobs:
+#   - job: waitForProdValidation
+#     pool: server
+#     timeoutInMinutes: 1440
+#     steps:
+#     - task: ManualValidation@0
+#       displayName: 'APPROVAL REQUIRED: Production Deployment'
+#       inputs:
+#         notifyUsers: 'prodteam@example.com'
+#         instructions: |
+#           This deployment is for PRODUCTION.
+#           Please review staging results and approve for production release.
+#           Deployment will proceed in 24 hours if not approved.
 
-    - task: AzureCLI@2
-      displayName: 'Backup production state'
-      inputs:
-        azureSubscription: $(azureServiceConnection)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
-          echo "Backup created: $BACKUP_NAME"
+#   - job: DeployProduction
+#     dependsOn: waitForProdValidation
+#     condition: succeeded()
+#     pool:
+#       vmImage: ubuntu-latest
+#     steps:
+#     - task: AzureResourceManagerTemplateDeployment@3
+#       displayName: 'Deploy App Service (Production)'
+#       inputs:
+#         deploymentScope: 'Resource Group'
+#         azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#         subscriptionId: $(SUBSCRIPTION_ID)
+#         action: 'Create Or Update Resource Group'
+#         resourceGroupName: '$(RESOURCE_GROUP)'
+#         location: '$(LOCATION)'
+#         templateLocation: 'Linked artifact'
+#         csmFile: 'infra/webapp-docker.bicep'
+#         csmParametersFile: 'infra/webapp-docker-prod.parameters.json'
+#         deploymentMode: 'Incremental'
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish deployment summary'
-      inputs:
-        pathToPublish: '$(Build.ArtifactStagingDirectory)'
-        artifactName: 'deployment-summary'
+#     - task: AzureResourceManagerTemplateDeployment@3
+#       displayName: 'Add role assignment (Production)'
+#       inputs:
+#         deploymentScope: 'Resource Group'
+#         azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#         subscriptionId: $(SUBSCRIPTION_ID)
+#         action: 'Create Or Update Resource Group'
+#         resourceGroupName: '$(RESOURCE_GROUP)'
+#         location: '$(LOCATION)'
+#         templateLocation: 'Linked artifact'
+#         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
+#         deploymentMode: 'Incremental'
+
+#     - task: AzureCLI@2
+#       displayName: 'Health check (Production)'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           sleep 30
+#           curl -f https://$(appServiceName).azurewebsites.net/health || exit 1
+#           echo "Production environment health check passed"
+
+#     - task: AzureCLI@2
+#       displayName: 'Backup production state'
+#       inputs:
+#         azureSubscription: $(azureServiceConnection)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
+#           echo "Backup created: $BACKUP_NAME"
+
+#     - task: PublishBuildArtifacts@1
+#       displayName: 'Publish deployment summary'
+#       inputs:
+#         pathToPublish: '$(Build.ArtifactStagingDirectory)'
+#         artifactName: 'deployment-summary'
