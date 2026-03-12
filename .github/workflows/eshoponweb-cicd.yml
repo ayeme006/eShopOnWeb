@@ -1,7 +1,7 @@
 name: eShopOnWeb Build and Test
 
 #Triggers (uncomment line below to use it)
-on: [push, workflow_dispatch]
+# on: [push, workflow_dispatch]
 
 #Environment variables https://docs.github.com/en/actions/learn-github-actions/environment-variables
 env:
@@ -26,10 +26,14 @@ jobs:
         dotnet-version: '8.0.x'
         dotnet-quality: 'preview'
     #Build/Test/Publish the .net project
+    - name: Restore dependencies
+      run: dotnet restore ./eShopOnWeb.sln
+    
     - name: Build with dotnet
-      run: dotnet build ./eShopOnWeb.sln --configuration Release
+      run: dotnet build ./eShopOnWeb.sln --configuration Release --no-restore
+    
     - name: Test with dotnet
-      run: dotnet test ./eShopOnWeb.sln --configuration Release
+      run: dotnet test ./eShopOnWeb.sln --configuration Release --no-build
     - name: dotnet publish
       run: |
         dotnet publish ./src/Web/Web.csproj -c Release -o ${{env.DOTNET_ROOT}}/myapp

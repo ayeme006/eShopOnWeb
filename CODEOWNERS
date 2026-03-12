@@ -1,0 +1,11 @@
+# CODEOWNERS for eShopOnWeb
+# Syntax: <pattern> <owner>
+
+# Owners for core code
+src/ApplicationCore/ @eShopOnWeb/core-team
+src/Infrastructure/ @eShopOnWeb/infrastructure-team
+src/Web/ @eShopOnWeb/web-team
+
+# Owners for infra and infra IaC
+infra/ @eShopOnWeb/cloud-team
+.ado/ @eShopOnWeb/devops-team
