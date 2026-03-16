@@ -32,6 +32,14 @@ var telemetryAppSettings = empty(appInsightsConnectionString)
         name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
         value: appInsightsConnectionString
       }
+      {
+        name: 'ApplicationInsightsAgent_EXTENSION_VERSION'
+        value: '~2'
+      }
+      {
+        name: 'XDT_MicrosoftApplicationInsights_Mode'
+        value: 'recommended'
+      }
     ]
 
 resource acr 'Microsoft.ContainerRegistry/registries@2021-09-01' existing = {
