@@ -1,0 +1,98 @@
+# Pre-deploy pipeline: foundational infra (ACR, App Service Plan)
+# Run manually or as a gated step before application CD
+
+name: PreDeploy-Infra-$(Date:yyyy.MM.dd)$(Rev:.r)
+
+trigger: none
+
+variables:
+  - group: Common-Secrets
+  - group: Build-Config
+  - group: Deployment-Config
+
+stages:
+  name: deployAcrAndAsp
+- stage: PreDeploy_Infrastructure
+  displayName: Pre-deploy Foundational Infrastructure
+  jobs:
+  - job: DeployFoundationalInfra
+    displayName: Deploy ACR and App Service Plan
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Deploy ACR (infra/acr.bicep)'
+      inputs:
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: '$(AZURE_SERVICE_CONNECTION)'
+        subscriptionId: '$(SUBSCRIPTION_ID)'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
+        templateLocation: 'Linked artifact'
+        csmFile: 'infra/acr.bicep'
+        deploymentMode: 'Incremental'
+        deploymentOutputs: 'acrOutputs'
+
+    - task: PowerShell@2
+      name: setAcrVars
+      displayName: 'Set ACR outputs as pipeline variables'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $raw = $env:ACROUTPUTS
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Error 'acrOutputs is empty. Ensure deploymentOutputs is configured on the ARM deployment task.'
+            exit 1
+          }
+
+          try {
+            $parsed = $raw | ConvertFrom-Json
+          }
+          catch {
+            Write-Error 'Failed to parse acrOutputs JSON.'
+            throw
+          }
+
+          if ($null -ne $parsed.properties) {
+            $outputs = $parsed.properties
+          }
+          else {
+            $outputs = $parsed
+          }
+
+          if ($null -eq $outputs.acrLoginServer -or [string]::IsNullOrWhiteSpace([string]$outputs.acrLoginServer.value)) {
+            Write-Error 'Required output acrLoginServer was not found in acrOutputs.'
+            exit 1
+          }
+
+          $acrLoginServer = [string]$outputs.acrLoginServer.value
+          Write-Host "Setting variable acrLoginServer"
+          Write-Host "##vso[task.setvariable variable=acrLoginServer;isOutput=true;issecret=false]$acrLoginServer"
+      env:
+        ACROUTPUTS: $(acrOutputs)
+
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Deploy App Service Plan (infra/asp.bicep)'
+      inputs:
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: '$(AZURE_SERVICE_CONNECTION)'
+        subscriptionId: '$(SUBSCRIPTION_ID)'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(RESOURCE_GROUP)'
+        location: '$(LOCATION)'
+        templateLocation: 'Linked artifact'
+        csmFile: 'infra/asp.bicep'
+        deploymentMode: 'Incremental'
+
+    - task: AzureCLI@2
+      displayName: 'Verify created resources'
+      inputs:
+        azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          echo "ACR login server: $(acrLoginServer)"
+          echo "Listing ACRs in resource group $(RESOURCE_GROUP):"
+          az acr list --resource-group $(RESOURCE_GROUP) --query "[].{name:name, loginServer:loginServer}" -o table || true

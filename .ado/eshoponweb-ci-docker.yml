@@ -1,23 +1,26 @@
 # CI Pipeline: Build, Test, Scan, and Push Docker Image
 # Triggered on GitHub commits to develop and PRs to main
+name: $(Date:yyyy.MM.dd)$(Rev:.r)
 
 trigger:
+  batch: true # Consolidate multiple pushes into one run
   branches:
     include:
-    - develop
-    - 'release/*'
-  paths:
-    include:
-    - 'src/**'
-    - 'tests/**'
-    - 'infra/**'
-    - '.ado/eshoponweb-ci-docker.yml'
+    # - develop
+    # - 'release/*'
+    - main
+  # paths:
+  #   include:
+  #   - 'src/**'
+  #   - 'tests/**'
+  #   - 'infra/**'
+  #   - '.ado/eshoponweb-ci-docker.yml'
 
 pr:
   branches:
     include:
     - main
-    - develop
+    # - develop
 
 resources:
   repositories:
@@ -136,10 +139,10 @@ stages:
     - task: SonarCloudAnalyze@3
       displayName: 'SonarCloud analyze'
 
-    - task: SonarCloudPublish@3
-    # Give the API a few seconds to register the task before publishing
-    - bash: sleep 15
-      displayName: 'Wait for API processing'
+    # - task: SonarCloudPublish@3
+    # # Give the API a few seconds to register the task before publishing
+    # - bash: sleep 15
+    #   displayName: 'Wait for API processing'
 
     - task: SonarCloudPublish@3
       displayName: 'Publish SonarCloud results'
