@@ -176,8 +176,7 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           az security assessment list \
-            --resource-group $(RESOURCE_GROUP) \
-            --query "[].{Name:displayName, Status:status.code}" \
+            --query "[?contains(id, '/resourceGroups/$(RESOURCE_GROUP)/')].{Name:displayName, Status:status.code}" \
             --output table
 
 # - stage: Deploy_Development
