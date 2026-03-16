@@ -28,7 +28,7 @@ param scaleOutCpu int = 70
 @description('CPU percentage threshold to scale in (percent)')
 param scaleInCpu int = 30
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-09-01' = {
   name: 'asp-${suffix}'
   location: location
   kind: 'linux'
@@ -42,7 +42,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
   }
 }
 
-resource autoscale 'Microsoft.Insights/autoscaleSettings@2015-04-01' = if (enableAutoscale) {
+resource autoscale 'Microsoft.Insights/autoscaleSettings@2022-10-01' = if (enableAutoscale) {
   name: 'autoscale-asp-${suffix}'
   location: location
   properties: {
@@ -60,6 +60,7 @@ resource autoscale 'Microsoft.Insights/autoscaleSettings@2015-04-01' = if (enabl
           {
             metricTrigger: {
               metricName: 'Percentage CPU'
+              metricNamespace: 'microsoft.web/serverfarms'
               metricResourceUri: appServicePlan.id
               timeGrain: 'PT1M'
               statistic: 'Average'
@@ -78,6 +79,7 @@ resource autoscale 'Microsoft.Insights/autoscaleSettings@2015-04-01' = if (enabl
           {
             metricTrigger: {
               metricName: 'Percentage CPU'
+              metricNamespace: 'microsoft.web/serverfarms'
               metricResourceUri: appServicePlan.id
               timeGrain: 'PT1M'
               statistic: 'Average'
