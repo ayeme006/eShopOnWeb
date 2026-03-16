@@ -59,7 +59,7 @@ resource autoscale 'Microsoft.Insights/autoscaleSettings@2022-10-01' = if (enabl
         rules: [
           {
             metricTrigger: {
-              metricName: 'Percentage CPU'
+              metricName: 'CpuPercentage'
               metricNamespace: 'microsoft.web/serverfarms'
               metricResourceUri: appServicePlan.id
               timeGrain: 'PT1M'
@@ -78,7 +78,7 @@ resource autoscale 'Microsoft.Insights/autoscaleSettings@2022-10-01' = if (enabl
           }
           {
             metricTrigger: {
-              metricName: 'Percentage CPU'
+              metricName: 'CpuPercentage'
               metricNamespace: 'microsoft.web/serverfarms'
               metricResourceUri: appServicePlan.id
               timeGrain: 'PT1M'
