@@ -256,19 +256,19 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-    - task: AzureResourceManagerTemplateDeployment@3
-      displayName: 'Deploy ACR using Bicep (if needed)'
-      inputs:
-        deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-        subscriptionId: $(SUBSCRIPTION_ID)
-        action: 'Create Or Update Resource Group'
-        resourceGroupName: '$(RESOURCE_GROUP)'
-        location: '$(LOCATION)'
-        templateLocation: 'Linked artifact'
-        csmFile: 'infra/acr.bicep'
-        deploymentMode: 'Incremental'
-        deploymentOutputs: 'outputJson'
+    # - task: AzureResourceManagerTemplateDeployment@3
+    #   displayName: 'Deploy ACR using Bicep (if needed)'
+    #   inputs:
+    #     deploymentScope: 'Resource Group'
+    #     azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+    #     subscriptionId: $(SUBSCRIPTION_ID)
+    #     action: 'Create Or Update Resource Group'
+    #     resourceGroupName: '$(RESOURCE_GROUP)'
+    #     location: '$(LOCATION)'
+    #     templateLocation: 'Linked artifact'
+    #     csmFile: 'infra/acr.bicep'
+    #     deploymentMode: 'Incremental'
+    #     deploymentOutputs: 'outputJson'
 
     - task: AzureCLI@2
       displayName: 'Build and push Docker image to ACR'
@@ -283,16 +283,6 @@ stages:
           RESOURCE_GROUP="$(RESOURCE_GROUP)"
 
           echo "Checking for ACR: $ACR_NAME..."
-          
-          # Wait for ACR to become visible  (DNS/ARM sync) 
-          for i in {1..5}; do
-            if az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
-              echo "Found ACR '$ACR_NAME'."
-              break
-            fi
-            echo "ACR not visible yet. Waiting 15s (Attempt $i/5)..."
-            sleep 15
-          done
 
           # 2. Fallback to listing if the specific name still isn't found
           if ! az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
