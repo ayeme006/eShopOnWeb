@@ -139,13 +139,15 @@ stages:
     - task: SonarCloudAnalyze@3
       displayName: 'SonarCloud analyze'
 
-    - task: SonarCloudPublish@3
-    # Give the API a few seconds to register the task before publishing
-    - bash: sleep 15
-      displayName: 'Wait for API processing'
+    # - task: SonarCloudPublish@3
+    # # Give the API a few seconds to register the task before publishing
+    # - bash: sleep 15
+    #   displayName: 'Wait for API processing'
 
     - task: SonarCloudPublish@3
       displayName: 'Publish SonarCloud results'
+      # Only publish if we're on main branch - SonarCloud free plan only allows publish on main branch, but we still want analysis to run on PRs and other branches for quality gates and feedback
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
       inputs:
         pollingTimeoutSec: '300'
 
