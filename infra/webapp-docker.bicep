@@ -10,6 +10,16 @@ param logAnalyticsWorkspaceId string
 @description('Application Insights connection string for application telemetry. Leave empty to skip this app setting.')
 param appInsightsConnectionString string = ''
 
+@description('App Service name. Defaults to a deterministic name based on the resource group.')
+param appServiceName string = 'app-${suffix}'
+
+@description('Deployment slot used for blue-green releases.')
+param stagingSlotName string = 'staging'
+
+@description('Container image tag for the staging slot deployment.')
+param stagingImageTag string = 'latest'
+
+
 var baseAppSettings = [
   {
     name: 'UseOnlyInMemoryDatabase'
@@ -46,20 +56,12 @@ resource acr 'Microsoft.ContainerRegistry/registries@2021-09-01' existing = {
   name: 'cr${suffix}'
 }
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' existing = {
   name: 'asp-${suffix}'
-  location: location
-  kind: 'linux'
-  properties: {
-    reserved: true
-  }
-  sku: {
-    name: 'B1'
-  }
 }
 
 resource webApp 'Microsoft.Web/sites@2022-03-01' = {
-  name: 'app-${suffix}'
+  name: appServiceName
   location: location
   tags: {}
   properties: {
@@ -67,6 +69,23 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
       acrUseManagedIdentityCreds: true
       appSettings: concat(baseAppSettings, telemetryAppSettings)
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:latest'
+    }
+    serverFarmId: appServicePlan.id
+  }
+  identity: {
+    type: 'SystemAssigned'
+  }
+}
+
+resource stagingSlot 'Microsoft.Web/sites/slots@2022-03-01' = {
+  name: stagingSlotName
+  parent: webApp
+  location: location
+  properties: {
+    siteConfig: {
+      acrUseManagedIdentityCreds: true
+      appSettings: concat(baseAppSettings, telemetryAppSettings)
+      linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:${stagingImageTag}'
     }
     serverFarmId: appServicePlan.id
   }
@@ -94,3 +113,6 @@ resource webAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-pre
     ]
   }
 }
+
+output webAppName string = webApp.name
+output slotName string = stagingSlot.name
