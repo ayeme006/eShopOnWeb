@@ -116,3 +116,5 @@ resource webAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-pre
 
 output webAppName string = webApp.name
 output slotName string = stagingSlot.name
+output webAppPrincipalId string = webApp.identity.principalId
+output stagingSlotPrincipalId string = stagingSlot.identity.principalId

@@ -194,7 +194,9 @@ stages:
 
           Write-Host "##vso[task.setvariable variable=webAppName;isOutput=true]$($outputs.webAppName.value)"
           Write-Host "##vso[task.setvariable variable=slotName;isOutput=true]$($outputs.slotName.value)"
-          Write-Host 'Published pipeline variables: webAppName, slotName'
+          Write-Host "##vso[task.setvariable variable=webAppPrincipalId;isOutput=true]$($outputs.webAppPrincipalId.value)"
+          Write-Host "##vso[task.setvariable variable=stagingSlotPrincipalId;isOutput=true]$($outputs.stagingSlotPrincipalId.value)"
+          Write-Host 'Published pipeline variables: webAppName, slotName, webAppPrincipalId, stagingSlotPrincipalId'
       env:
         WEBAPP_OUTPUTS: $(webAppOutputs)
     
@@ -213,6 +215,9 @@ stages:
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
         deploymentMode: 'Incremental'
+        overrideParameters: >
+          -webAppPrincipalId "$(setWebAppVars.webAppPrincipalId)"
+          -stagingSlotPrincipalId "$(setWebAppVars.stagingSlotPrincipalId)"
 
     - task: AzureCLI@2
       displayName: 'Blue-Green: Deploy container image to staging slot'
