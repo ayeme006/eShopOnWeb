@@ -272,6 +272,7 @@ stages:
 
           echo "Waiting for slot warmup..."
           sleep 30
+          echo "Checking health endpoint at $SLOT_URL"
           curl -f "$SLOT_URL"
           echo "Staging slot health check passed"
 
