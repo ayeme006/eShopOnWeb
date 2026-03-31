@@ -20,7 +20,8 @@ public class ApiHealthCheck : IHealthCheck
         HealthCheckContext context,
         CancellationToken cancellationToken = default(CancellationToken))
     {
-        string myUrl = _baseUrlConfiguration.ApiBase + "catalog-items";
+        // string myUrl = _baseUrlConfiguration.ApiBase + "catalog-items";
+        string myUrl = _baseUrlConfiguration.ApiBase.Replace("/api/", "/") + "basket";
         var client = new HttpClient();
         var response = await client.GetAsync(myUrl);
 
@@ -29,7 +30,7 @@ public class ApiHealthCheck : IHealthCheck
         // I API responds with 200 Ok, the service is considered healthy. If it responds with any other status code, it's considered unhealthy.
         if (response.IsSuccessStatusCode)
         {
-            return HealthCheckResult.Healthy("The check indicates a healthy result.");
+            return HealthCheckResult.Healthy($"The check indicates a healthy result on URL {myUrl}.");
         }
 
         var pageContents = await response.Content.ReadAsStringAsync();
@@ -38,6 +39,6 @@ public class ApiHealthCheck : IHealthCheck
             return HealthCheckResult.Healthy("The check indicates a healthy result.");
         }
 
-        return HealthCheckResult.Unhealthy("The check indicates an unhealthy result.");
+        return HealthCheckResult.Unhealthy($"The check indicates an unhealthy result on URL {myUrl}.");
     }
 }
