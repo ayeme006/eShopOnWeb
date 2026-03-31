@@ -19,6 +19,13 @@ param stagingSlotName string = 'staging'
 @description('Container image tag for the staging slot deployment.')
 param stagingImageTag string = 'latest'
 
+// This calculates the URL for whatever slot/app it's assigned to
+@description('The URL for the staging slot, used for health checks during deployment.')
+var stagingApiUrl = 'https://${appServiceName}-${stagingSlotName}.azurewebsites.net/api/'
+
+@description('The URL for the production slot, used for health checks during deployment.')  
+var productionApiUrl = 'https://${appServiceName}.azurewebsites.net/api/'
+
 
 var baseAppSettings = [
   {
@@ -67,7 +74,12 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
   properties: {
     siteConfig: {
       acrUseManagedIdentityCreds: true
-      appSettings: concat(baseAppSettings, telemetryAppSettings)
+      appSettings: union(baseAppSettings, telemetryAppSettings, [
+        {
+          name: 'baseUrls__apiBase'
+          value: productionApiUrl
+        }
+      ])
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:latest'
     }
     serverFarmId: appServicePlan.id
@@ -84,7 +96,12 @@ resource stagingSlot 'Microsoft.Web/sites/slots@2022-03-01' = {
   properties: {
     siteConfig: {
       acrUseManagedIdentityCreds: true
-      appSettings: concat(baseAppSettings, telemetryAppSettings)
+      appSettings: union(baseAppSettings, telemetryAppSettings, [
+        {
+          name: 'baseUrls__apiBase'
+          value: stagingApiUrl
+        }
+      ])
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:${stagingImageTag}'
     }
     serverFarmId: appServicePlan.id
@@ -110,6 +127,17 @@ resource webAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-pre
         category: 'AllMetrics'
         enabled: true
       }
+    ]
+  }
+}
+
+// This resource ensures 'baseUrls__apiBase' doesn't move during a slot swap.
+resource slotConfig 'Microsoft.Web/sites/config@2022-03-01' = {
+  name: 'slotConfigNames'
+  parent: webApp
+  properties: {
+    appSettingNames: [
+      'baseUrls__apiBase'
     ]
   }
 }
