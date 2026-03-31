@@ -10,6 +10,23 @@ param logAnalyticsWorkspaceId string
 @description('Application Insights connection string for application telemetry. Leave empty to skip this app setting.')
 param appInsightsConnectionString string = ''
 
+@description('App Service name. Defaults to a deterministic name based on the resource group.')
+param appServiceName string = 'app-${suffix}'
+
+@description('Deployment slot used for blue-green releases.')
+param stagingSlotName string = 'staging'
+
+@description('Container image tag for the staging slot deployment.')
+param stagingImageTag string = 'latest'
+
+// This calculates the URL for whatever slot/app it's assigned to
+@description('The URL for the staging slot, used for health checks during deployment.')
+var stagingApiUrl = 'https://${appServiceName}-${stagingSlotName}.azurewebsites.net/api/'
+
+@description('The URL for the production slot, used for health checks during deployment.')  
+var productionApiUrl = 'https://${appServiceName}.azurewebsites.net/api/'
+
+
 var baseAppSettings = [
   {
     name: 'UseOnlyInMemoryDatabase'
@@ -46,27 +63,46 @@ resource acr 'Microsoft.ContainerRegistry/registries@2021-09-01' existing = {
   name: 'cr${suffix}'
 }
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' existing = {
   name: 'asp-${suffix}'
-  location: location
-  kind: 'linux'
-  properties: {
-    reserved: true
-  }
-  sku: {
-    name: 'B1'
-  }
 }
 
 resource webApp 'Microsoft.Web/sites@2022-03-01' = {
-  name: 'app-${suffix}'
+  name: appServiceName
   location: location
   tags: {}
   properties: {
     siteConfig: {
       acrUseManagedIdentityCreds: true
-      appSettings: concat(baseAppSettings, telemetryAppSettings)
+      appSettings: union(baseAppSettings, telemetryAppSettings, [
+        {
+          name: 'baseUrls__apiBase'
+          value: productionApiUrl
+        }
+      ])
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:latest'
+    }
+    serverFarmId: appServicePlan.id
+  }
+  identity: {
+    type: 'SystemAssigned'
+  }
+}
+
+resource stagingSlot 'Microsoft.Web/sites/slots@2022-03-01' = {
+  name: stagingSlotName
+  parent: webApp
+  location: location
+  properties: {
+    siteConfig: {
+      acrUseManagedIdentityCreds: true
+      appSettings: union(baseAppSettings, telemetryAppSettings, [
+        {
+          name: 'baseUrls__apiBase'
+          value: stagingApiUrl
+        }
+      ])
+      linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/eshoponweb/web:${stagingImageTag}'
     }
     serverFarmId: appServicePlan.id
   }
@@ -94,3 +130,19 @@ resource webAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-pre
     ]
   }
 }
+
+// This resource ensures 'baseUrls__apiBase' doesn't move during a slot swap.
+resource slotConfig 'Microsoft.Web/sites/config@2022-03-01' = {
+  name: 'slotConfigNames'
+  parent: webApp
+  properties: {
+    appSettingNames: [
+      'baseUrls__apiBase'
+    ]
+  }
+}
+
+output webAppName string = webApp.name
+output slotName string = stagingSlot.name
+output webAppPrincipalId string = webApp.identity.principalId
+output stagingSlotPrincipalId string = stagingSlot.identity.principalId

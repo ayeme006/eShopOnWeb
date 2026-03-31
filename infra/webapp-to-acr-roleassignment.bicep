@@ -4,8 +4,13 @@ param suffix string = uniqueString(resourceGroup().id)
 @description('Set the ACR Pull Role Definition ID')
 param acrPullRoleDefinitionID string = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 
+@description('Use to generate a unitque name for the role assignment')
+param webAppPrincipalId string
+param stagingSlotPrincipalId string
+
 @description('Generate a unique GUID to use as name for the role assignment')
-var webAppToAcrRoleAssignmentName = guid(webApp.id, acrPullRoleDefinitionID, acr.id)
+var webAppToAcrRoleAssignmentName = guid(webApp.id, acrPullRoleDefinitionID, webAppPrincipalId)
+var webAppSlotToAcrRoleAssignmentName = guid(webAppStagingSlot.id, acrPullRoleDefinitionID, stagingSlotPrincipalId)
 
 
 resource acr 'Microsoft.ContainerRegistry/registries@2022-02-01-preview' existing = {
@@ -16,11 +21,25 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' existing = {
   name: 'app-${suffix}'
 }
 
+resource webAppStagingSlot 'Microsoft.Web/sites/slots@2022-03-01' existing = {
+  name: 'staging'
+  parent: webApp
+}
+
 resource webAppToAcrRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: acr
   name: webAppToAcrRoleAssignmentName
   properties: {
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleDefinitionID)
     principalId: webApp.identity.principalId
+  }
+}
+
+resource webAppStagingSlotToAcrRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: acr
+  name: webAppSlotToAcrRoleAssignmentName
+  properties: {
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleDefinitionID)
+    principalId: webAppStagingSlot.identity.principalId
   }
 }

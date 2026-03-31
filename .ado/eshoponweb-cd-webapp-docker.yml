@@ -6,7 +6,7 @@ trigger: none
 resources:
   pipelines:
     - pipeline: CI_Build
-      source: eshoponweb-ci-docker
+      source: eshoponweb-ci-docker-github
       trigger:
         branches:
           include:
@@ -148,9 +148,57 @@ stages:
         csmFile: 'infra/webapp-docker.bicep'
         # csmParametersFile: 'infra/webapp-docker-dev.parameters.json'
         deploymentMode: 'Incremental'
+        deploymentOutputs: 'webAppOutputs'
         overrideParameters: >
           -appInsightsConnectionString "$(setAppInsightsVars.appInsightsConnectionString)"
           -logAnalyticsWorkspaceId "$(setAppInsightsVars.logAnalyticsWorkspaceId)"
+          -stagingImageTag "$(resources.pipeline.CI_Build.runID)"
+
+    - task: PowerShell@2
+      name: setWebAppVars
+      displayName: 'Set web app outputs as pipeline variables'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $raw = $env:WEBAPP_OUTPUTS
+
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Error 'webAppOutputs is empty. Ensure deploymentOutputs is configured on the ARM deployment task.'
+            exit 1
+          }
+
+          try {
+            $parsed = $raw | ConvertFrom-Json
+          }
+          catch {
+            Write-Error 'Failed to parse webAppOutputs JSON.'
+            throw
+          }
+
+          if ($null -ne $parsed.properties) {
+            $outputs = $parsed.properties
+          }
+          else {
+            $outputs = $parsed
+          }
+
+          if ($null -eq $outputs.webAppName -or [string]::IsNullOrWhiteSpace([string]$outputs.webAppName.value)) {
+            Write-Error 'Required output webAppName was not found in webAppOutputs.'
+            exit 1
+          }
+
+          if ($null -eq $outputs.slotName -or [string]::IsNullOrWhiteSpace([string]$outputs.slotName.value)) {
+            Write-Error 'Required output slotName was not found in webAppOutputs.'
+            exit 1
+          }
+
+          Write-Host "##vso[task.setvariable variable=webAppName;isOutput=true]$($outputs.webAppName.value)"
+          Write-Host "##vso[task.setvariable variable=slotName;isOutput=true]$($outputs.slotName.value)"
+          Write-Host "##vso[task.setvariable variable=webAppPrincipalId;isOutput=true]$($outputs.webAppPrincipalId.value)"
+          Write-Host "##vso[task.setvariable variable=stagingSlotPrincipalId;isOutput=true]$($outputs.stagingSlotPrincipalId.value)"
+          Write-Host 'Published pipeline variables: webAppName, slotName, webAppPrincipalId, stagingSlotPrincipalId'
+      env:
+        WEBAPP_OUTPUTS: $(webAppOutputs)
     
 
 
@@ -167,6 +215,111 @@ stages:
         templateLocation: 'Linked artifact'
         csmFile: 'infra/webapp-to-acr-roleassignment.bicep'
         deploymentMode: 'Incremental'
+        overrideParameters: >
+          -webAppPrincipalId "$(setWebAppVars.webAppPrincipalId)"
+          -stagingSlotPrincipalId "$(setWebAppVars.stagingSlotPrincipalId)"
+
+    - task: AzureCLI@2
+      displayName: 'Blue-Green: Deploy container image to staging slot'
+      inputs:
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+
+          WEBAPP_NAME="$(setWebAppVars.webAppName)"
+          SLOT_NAME="$(setWebAppVars.slotName)"
+          IMAGE_TAG="$(resources.pipeline.CI_Build.runID)"
+
+          ACR_NAME="$(REGISTRY)"
+          if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
+            ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+            echo "No Azure Container Registry found in resource group $(RESOURCE_GROUP)."
+            exit 1
+          fi
+
+          ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
+          IMAGE_NAME="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):${IMAGE_TAG}"
+
+          echo "Deploying ${IMAGE_NAME} to slot ${SLOT_NAME} on ${WEBAPP_NAME}..."
+          az webapp config container set \
+            --resource-group "$(RESOURCE_GROUP)" \
+            --name "$WEBAPP_NAME" \
+            --slot "$SLOT_NAME" \
+            --container-image-name "$IMAGE_NAME" \
+            --container-registry-url "https://${ACR_LOGIN_SERVER}"
+
+          az webapp restart \
+            --resource-group "$(RESOURCE_GROUP)" \
+            --name "$WEBAPP_NAME" \
+            --slot "$SLOT_NAME"
+
+    - task: AzureCLI@2
+      displayName: 'Blue-Green: Smoke test staging slot'
+      inputs:
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          WEBAPP_NAME="$(setWebAppVars.webAppName)"
+          SLOT_NAME="$(setWebAppVars.slotName)"
+          SLOT_URL="https://${WEBAPP_NAME}-${SLOT_NAME}.azurewebsites.net/health"
+
+          echo "Waiting for slot warmup..."
+          sleep 30
+          echo "Checking health endpoint at $SLOT_URL"
+          curl -f "$SLOT_URL"
+          echo "Staging slot health check passed"
+
+  - job: AwaitProductionApproval
+    displayName: 'Await approval before production swap'
+    dependsOn: DeployInfra
+    condition: succeeded()
+    pool: server
+    timeoutInMinutes: 1440
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440
+      inputs:
+        notifyUsers: $(ADMIN_EMAIL)
+        instructions: |
+          Review the staging slot validation results before promoting this deployment.
+          Approve to swap the staging slot into production.
+        onTimeout: 'reject'
+
+  - job: SwapToProduction
+    displayName: 'Swap staging slot to production'
+    dependsOn:
+    - DeployInfra
+    - AwaitProductionApproval
+    condition: succeeded()
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+      webAppName: $[ dependencies.DeployInfra.outputs['setWebAppVars.webAppName'] ]
+      slotName: $[ dependencies.DeployInfra.outputs['setWebAppVars.slotName'] ]
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Blue-Green: Swap staging slot to production'
+      inputs:
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          WEBAPP_NAME="$(webAppName)"
+          SLOT_NAME="$(slotName)"
+
+          az webapp deployment slot swap \
+            --resource-group "$(RESOURCE_GROUP)" \
+            --name "$WEBAPP_NAME" \
+            --slot "$SLOT_NAME" \
+            --target-slot production
 
     - task: AzureCLI@2
       displayName: 'Validate policy compliance'
