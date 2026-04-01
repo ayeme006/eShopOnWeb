@@ -11,8 +11,8 @@ resources:
         branches:
           include:
             - main
-          stages:
-            - Image_Scanning  # This tells CD: "Wait until CI reaches and finishes this stage"
+        stages:
+          - Image_Scanning  # This tells CD: "Wait until CI reaches and finishes this stage"
 
   repositories:
     - repository: self
