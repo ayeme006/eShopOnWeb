@@ -6,21 +6,12 @@ trigger:
   batch: true # Consolidate multiple pushes into one run
   branches:
     include:
-    # - develop
-    # - 'release/*'
     - main
-  # paths:
-  #   include:
-  #   - 'src/**'
-  #   - 'tests/**'
-  #   - 'infra/**'
-  #   - '.ado/eshoponweb-ci-docker.yml'
 
 pr:
   branches:
     include:
     - main
-    # - develop
 
 resources:
   repositories:
