@@ -4,6 +4,7 @@
 name: PreDeploy-Infra-$(Date:yyyy.MM.dd)$(Rev:.r)
 
 trigger: none
+pr: none # This tells ADO "Don't even think about running this on a PR"
 
 variables:
   - group: Common-Secrets

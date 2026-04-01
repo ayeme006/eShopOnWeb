@@ -10,8 +10,10 @@ resources:
       trigger:
         branches:
           include:
-            # - develop
             - main
+          stages:
+            - Image_Scanning  # This tells CD: "Wait until CI reaches and finishes this stage"
+
   repositories:
     - repository: self
       type: github
