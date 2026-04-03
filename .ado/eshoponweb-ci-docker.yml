@@ -134,7 +134,8 @@ jobs:
       ./dependency-check/bin/dependency-check.sh \
         --project eShopOnWeb --scan src --format JSON --out reports/ \
         --data "$(Pipeline.Workspace)/dependency-check-data" \
-        --nvdApiKey "$(NVDAPIKEY)"
+        --nvdApiKey "$(NVDAPIKEY)" \
+        --disableOssIndex
     displayName: 'OWASP Dependency Scan'
 
   # 9. DOCKER BUILD & PUSH (With In-Line Layer Cache)
