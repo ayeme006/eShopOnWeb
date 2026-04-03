@@ -59,15 +59,7 @@ jobs:
       restoreKeys: |
         nuget | "$(Agent.OS)"
 
-  # 3. CONSOLIDATED RESTORE & BUILD
-  - task: DotNetCoreCLI@2
-    displayName: 'Restore & Build Solution'
-    inputs:
-      command: build
-      projects: '**/*.sln'
-      arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
-
-  # 4. SONARCLOUD PREPARATION
+  # 3. SONARCLOUD PREPARATION
   - task: SonarCloudPrepare@3
     displayName: 'Prepare SonarCloud Analysis'
     inputs:
@@ -76,6 +68,14 @@ jobs:
       scannerMode: 'dotnet'
       projectKey: '$(SONARCLOUD_PROJECT_KEY)'
       projectName: '$(SONARCLOUD_PROJECT_NAME)'
+
+  # 4. CONSOLIDATED RESTORE & BUILD
+  - task: DotNetCoreCLI@2
+    displayName: 'Restore & Build Solution'
+    inputs:
+      command: build
+      projects: '**/*.sln'
+      arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
 
   # 5. TEST WITH COVERAGE (Using --no-build for speed)
   - task: DotNetCoreCLI@2
