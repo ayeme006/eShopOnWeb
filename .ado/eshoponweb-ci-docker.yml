@@ -186,16 +186,58 @@ jobs:
         echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
   
   # 10. CONTAINER IMAGE SCANNING (Trivy)
-  - script: |
-      TRIVY_VERSION="0.60.0"
-      ACR_LOGIN_SERVER=$(az acr show --name $(REGISTRY) --query "loginServer" -o tsv)
-      IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
-      
-      docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd):/work" \
-        aquasec/trivy:${TRIVY_VERSION} image \
-        --severity CRITICAL,HIGH --format json --output /work/trivy-report.json \
-        "$IMAGE_PATH"
-    displayName: 'Trivy Vulnerability Scan'
+  - task: AzureCLI@2
+    displayName: 'Scan image with Trivy'
+    inputs:
+      azureSubscription: $(AZURE_SERVICE_CONNECTION)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+
+        ACR_NAME="$(REGISTRY)"
+        if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
+          ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
+        fi
+
+        if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+          echo "No Azure Container Registry found in resource group $(RESOURCE_GROUP)."
+          exit 1
+        fi
+
+        ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
+        IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
+
+        echo "Getting ACR refresh token for Docker login..."
+        ACR_REFRESH_TOKEN=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+
+        echo "Logging Docker into ${ACR_LOGIN_SERVER}..."
+        docker login "$ACR_LOGIN_SERVER" \
+          --username "00000000-0000-0000-0000-000000000000" \
+          --password "$ACR_REFRESH_TOKEN"
+
+        echo "Pulling image ${IMAGE_PATH}..."
+        docker pull "$IMAGE_PATH"
+
+        TRIVY_VERSION="0.60.0"
+        echo "Running Trivy ${TRIVY_VERSION} in Docker..."
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$(pwd):/work" \
+          aquasec/trivy:${TRIVY_VERSION} image \
+          --severity CRITICAL,HIGH \
+          --exit-code 0 \
+          --format json \
+          --output /work/trivy-report.json \
+          "$IMAGE_PATH"
+        
+        if command -v jq &> /dev/null; then
+            echo "##[group]Trivy Scan Summary"
+            jq '.Results[] | {Target: .Target, Vulnerabilities: .Vulnerabilities | length}' reports/trivy-report.json
+            echo "##[endgroup]"
+          else
+            echo "Trivy scan complete. Report saved to reports/trivy-report.json"
+          fi
 
   # 11. ARTIFACT PUBLICATION
   - task: PublishBuildArtifacts@1
