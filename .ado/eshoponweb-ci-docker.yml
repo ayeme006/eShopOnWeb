@@ -1,25 +1,24 @@
-# CI Pipeline: Build, Test, Scan, and Push Docker Image
-# Triggered on GitHub commits to develop and PRs to main
+# CI Pipeline: Optimized Single-Stage "Speed & Secucrity"
 name: $(Date:yyyy.MM.dd)$(Rev:.r)
 
 trigger:
   batch: true # Consolidate multiple pushes into one run
   branches:
-    include:
-    - main
+    include: [ main ]
 
 pr:
   branches:
-    include:
-    - main
+    include: [ main ]
 
+# --- THE RESTORED RESOURCES BLOCK ---
 resources:
   repositories:
     - repository: self
       type: github
       name: $(GITHUB_OWNER)/$(GITHUB_REPO)
-      endpoint: $(GITHUB_ENDPOINT)
-      trigger: none
+      endpoint: $(GITHUB_ENDPOINT) # This points to your GitHub Service Connection
+      trigger: none # We use the top-level trigger instead
+# ------------------------------------
 
 variables:
   # Reference variable groups from Azure DevOps (linked to Key Vault)
@@ -27,250 +26,126 @@ variables:
   - group: Build-Config
   - group: Deployment-Config
   # Local overrides (if needed)
+  - name: NUGET_PACKAGES_PATH
+    value: $(HOME)/.nuget/packages
+  - name: DOTNET_SKIP_FIRST_TIME_EXPERIENCE # Speed hack: skip .NET welcome text
+    value: true
+  - name: DOTNET_CLI_TELEMETRY_OPTOUT
+    value: true
   - name: canary.isPreRelease
     value: $[ne(variables['Build.SourceBranch'], 'refs/heads/main')]
  
-stages:
-
-- stage: Restore_and_Build
-  displayName: Restore and Build
-  jobs:
-  - job: RestoreBuild
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: UseDotNet@2
-      displayName: 'Use .NET $(DOTNET_VERSION)'
-      inputs:
-        version: $(DOTNET_VERSION)
-
-    - task: DotNetCoreCLI@2
-      displayName: 'Restore packages'
-      inputs:
-        command: restore
-        projects: '**/*.sln'
-# This is a test
-    - task: DotNetCoreCLI@2
-      displayName: 'Build solution'
-      inputs:
-        command: build
-        projects: '**/*.sln'
-        arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
-
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish build artifacts'
-      inputs:
-        pathToPublish: '$(Build.ArtifactStagingDirectory)'
-        artifactName: 'build'
-
-- stage: Test_and_Coverage
-  displayName: Test and Code Coverage
-  dependsOn: Restore_and_Build
-  condition: succeeded()
-  jobs:
-  - job: UnitTests
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: UseDotNet@2
-      displayName: 'Use .NET $(DOTNET_VERSION)'
-      inputs:
-        version: $(DOTNET_VERSION)
-
-    - task: DotNetCoreCLI@2
-      displayName: 'Restore packages'
-      inputs:
-        command: restore
-        projects: '**/*UnitTests/*.csproj'
-
-    - task: DotNetCoreCLI@2
-      displayName: 'Run unit tests with coverage'
-      inputs:
-        command: test
-        projects: '**/*UnitTests/*.csproj'
-        arguments: '--configuration Release --no-restore --collect:"XPlat Code Coverage"'
-        publishTestResults: true
-
-    - task: PublishCodeCoverageResults@1
-      displayName: 'Publish code coverage'
-      inputs:
-        codeCoverageTool: Cobertura
-        summaryFileLocation: '$(Agent.TempDirectory)/**/*coverage.cobertura.xml'
-
-- stage: Static_Analysis
-  displayName: Code Quality & SAST
-  dependsOn: Test_and_Coverage
-  condition: succeeded()
-  jobs:
-  - job: SonarCloud
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: UseDotNet@2
-      displayName: 'Use .NET $(DOTNET_VERSION)'
-      inputs:
-        version: $(DOTNET_VERSION)
-
-    - task: SonarCloudPrepare@3
-      displayName: 'SonarCloud prepare'
-      inputs:
-        SonarCloud: '$(SONARCLOUDCONNECTION)'
-        organization: '$(SONARCLOUD_ORG)'
-        scannerMode: "dotnet"
-        projectKey: '$(SONARCLOUD_PROJECT_KEY)'
-        projectName: '$(SONARCLOUD_PROJECT_NAME)'
-
-    - task: DotNetCoreCLI@2
-      displayName: 'Build for analysis'
-      inputs:
-        command: build
-        projects: '**/*.csproj'
-        arguments: '--configuration Release'
-
-    - task: SonarCloudAnalyze@3
-      displayName: 'SonarCloud analyze'
-
-    # - task: SonarCloudPublish@3
-    # # Give the API a few seconds to register the task before publishing
-    # - bash: sleep 15
-    #   displayName: 'Wait for API processing'
-
-    - task: SonarCloudPublish@3
-      displayName: 'Publish SonarCloud results'
-      # Only publish if we're on main branch - SonarCloud free plan only allows publish on main branch, but we still want analysis to run on PRs and other branches for quality gates and feedback
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-      inputs:
-        pollingTimeoutSec: '300'
 
 
-- stage: Infra_Validation
-  displayName: IaC Linting & Policy Check
-  dependsOn: Static_Analysis
-  condition: succeeded()
-  jobs:
-  - job: BicepLint
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: AzureCLI@2
-      displayName: 'Lint Bicep templates'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          # Install Bicep CLI
-          az bicep install
-          # Lint all Bicep files
-          for file in infra/*.bicep; do
-            echo "Linting $file..."
-            az bicep build --file "$file"
-            az bicep lint --file "$file"
-          done
+jobs:
+- job: Consolidated_CI
+  displayName: 'Full Verification & Containerization'
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  # 1. ENVIRONMENT SETUP
+  - task: UseDotNet@2
+    displayName: 'Use .NET $(DOTNET_VERSION)'
+    inputs:
+      version: $(DOTNET_VERSION)
 
-    - task: AzureCLI@2
-      displayName: 'Validate Bicep against Azure Policy'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          # Run what-if to validate compliance
-          az deployment group what-if \
-            --resource-group $(RESOURCE_GROUP) \
-            --template-file infra/main.bicep \
-            --parameters infra/main.parameters.json \
-            || echo "Policy validation warnings (non-blocking)"
+  # 2. GLOBAL NUGET CACHE
+  - task: Cache@2
+    displayName: 'Cache NuGet packages'
+    inputs:
+      key: 'nuget | "$(Agent.OS)" | **/*.csproj'
+      path: $(NUGET_PACKAGES_PATH)
+      cacheHitVar: CACHE_RESTORED
+      restoreKeys: |
+        nuget | "$(Agent.OS)"
 
-- stage: Dependency_Scanning
-  displayName: Dependency & Vulnerability Scan
-  dependsOn: Infra_Validation
-  condition: succeeded()
-  jobs:
-  - job: DependencyCheck
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: Cache@2
-      displayName: 'Cache Dependency-Check NVD data'
-      inputs:
-        key: 'dependency-check | "$(Agent.OS)" | "12.1.0"'
-        restoreKeys: |
-          dependency-check | "$(Agent.OS)"
-        path: '$(Pipeline.Workspace)/dependency-check-data'
+  # 3. CONSOLIDATED RESTORE & BUILD
+  - task: DotNetCoreCLI@2
+    displayName: 'Restore & Build Solution'
+    inputs:
+      command: build
+      projects: '**/*.sln'
+      arguments: '--configuration Release /p:ContinuousIntegrationBuild=true'
 
-    - task: CmdLine@2
-      displayName: 'Install OWASP Dependency-Check'
-      inputs:
-        script: |
-          set -euo pipefail
-          DC_VERSION="12.1.0"
-          curl -sSL "https://github.com/jeremylong/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip" -o dependency-check.zip
-          unzip -q dependency-check.zip
-          chmod +x dependency-check/bin/dependency-check.sh
+  # 4. SONARCLOUD PREPARATION
+  - task: SonarCloudPrepare@3
+    displayName: 'Prepare SonarCloud Analysis'
+    inputs:
+      SonarCloud: '$(SONARCLOUDCONNECTION)'
+      organization: '$(SONARCLOUD_ORG)'
+      scannerMode: 'dotnet'
+      projectKey: '$(SONARCLOUD_PROJECT_KEY)'
+      projectName: '$(SONARCLOUD_PROJECT_NAME)'
 
-    - task: CmdLine@2
-      displayName: 'Scan NuGet dependencies'
-      inputs:
-        script: |
-          set -euo pipefail
-          mkdir -p reports
-          mkdir -p "$(Pipeline.Workspace)/dependency-check-data"
-          chmod -R 700 "$(Pipeline.Workspace)/dependency-check-data"
-          if [ -z "$MY_NVD_KEY" ]; then
-            echo "MY_NVD_KEY is not set. Add it as a secret variable in your variable group."
-            exit 1
-          fi
-          ./dependency-check/bin/dependency-check.sh \
-            --project eShopOnWeb \
-            --scan src \
-            --format JSON \
-            --out reports/ \
-            --data "$(Pipeline.Workspace)/dependency-check-data" \
-            --nvdApiKey "$MY_NVD_KEY" \
-            --disableOssIndex
-          cat reports/dependency-check-report.json
-      env:
-        MY_NVD_KEY: $(NVDAPIKEY) # Maps the Key Vault secret to a shell variable
+  # 5. TEST WITH COVERAGE (Using --no-build for speed)
+  - task: DotNetCoreCLI@2
+    displayName: 'Execute Unit Tests'
+    inputs:
+      command: test
+      projects: '**/*UnitTests/*.csproj'
+      arguments: '--configuration Release --no-build --collect:"XPlat Code Coverage"'
+      publishTestResults: true
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish scan results'
-      inputs:
-        pathToPublish: 'reports/'
-        artifactName: 'dependency-reports'
-      condition: always()
+  # 6. SONARCLOUD EXECUTION
+  - task: SonarCloudAnalyze@3
+    displayName: 'Run Code Quality Analysis'
 
-- stage: Build_and_Push_Image
-  displayName: Build and Push Docker Image
-  dependsOn: Dependency_Scanning
-  condition: succeeded()
-  jobs:
-  - job: DockerBuild
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    # - task: AzureResourceManagerTemplateDeployment@3
-    #   displayName: 'Deploy ACR using Bicep (if needed)'
-    #   inputs:
-    #     deploymentScope: 'Resource Group'
-    #     azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
-    #     subscriptionId: $(SUBSCRIPTION_ID)
-    #     action: 'Create Or Update Resource Group'
-    #     resourceGroupName: '$(RESOURCE_GROUP)'
-    #     location: '$(LOCATION)'
-    #     templateLocation: 'Linked artifact'
-    #     csmFile: 'infra/acr.bicep'
-    #     deploymentMode: 'Incremental'
-    #     deploymentOutputs: 'outputJson'
+   # SONARCLOUD PUBLISHING (Only on main branch)
+  - task: SonarCloudPublish@3
+    displayName: 'Publish SonarCloud results'
+    # Only publish if we're on main branch - SonarCloud free plan only allows publish on main branch, but we still want analysis to run on PRs and other branches for quality gates and feedback
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    inputs:
+      pollingTimeoutSec: '300'
 
-    - task: AzureCLI@2
-      displayName: 'Build and push Docker image to ACR'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          set -euo pipefail
+  # 7. INFRASTRUCTURE VALIDATION (Bicep)
+  - task: AzureCLI@2
+    displayName: 'Lint Bicep templates'
+    inputs:
+      azureSubscription: $(AZURE_SERVICE_CONNECTION)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        # Install Bicep CLI
+        az bicep install
+        # Lint all Bicep files
+        for file in infra/*.bicep; do
+          echo "Linting $file..."
+          az bicep build --file "$file"
+          az bicep lint --file "$file"
+        done
+
+  # 8. DEPENDENCY SCANNING (OWASP)
+  - task: Cache@2
+    displayName: 'Cache Dependency-Check NVD data'
+    inputs:
+      key: 'dependency-check | "$(Agent.OS)" | "12.1.0"'
+      restoreKeys: |
+        dependency-check | "$(Agent.OS)"
+      path: '$(Pipeline.Workspace)/dependency-check-data'
+    
+  - script: |
+      set -euo pipefail
+      DC_VERSION="12.1.0"
+      if [ ! -d "dependency-check" ]; then
+        curl -sSL "https://github.com/jeremylong/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip" -o dc.zip
+        unzip -q dc.zip && chmod +x dependency-check/bin/dependency-check.sh
+      fi
+      ./dependency-check/bin/dependency-check.sh \
+        --project eShopOnWeb --scan src --format JSON --out reports/ \
+        --data "$(Pipeline.Workspace)/dependency-check-data" \
+        --nvdApiKey "$(NVDAPIKEY)"
+    displayName: 'OWASP Dependency Scan'
+
+  # 9. DOCKER BUILD & PUSH (With In-Line Layer Cache)
+  - task: AzureCLI@2
+    displayName: 'Docker Build & Push'
+    inputs:
+      azureSubscription: $(AZURE_SERVICE_CONNECTION)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
 
           ACR_NAME="$(REGISTRY)"
           RESOURCE_GROUP="$(RESOURCE_GROUP)"
@@ -295,80 +170,322 @@ stages:
 
           echo "Logging into ACR ${ACR_NAME}..."
           az acr login --name "$ACR_NAME"
+        
+        # Optimization: Pull latest image as cache source
+        docker pull "${IMAGE_PATH}:latest" || true
+        
+        docker build --cache-from "${IMAGE_PATH}:latest" \
+          -f src/Web/Dockerfile \
+          -t "${IMAGE_PATH}:$(Build.BuildId)" \
+          -t "${IMAGE_PATH}:latest" .
+        
+        docker push "${IMAGE_PATH}:$(Build.BuildId)"
+        docker push "${IMAGE_PATH}:latest"
+        
+        echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
+  
+  # 10. CONTAINER IMAGE SCANNING (Trivy)
+  - script: |
+      TRIVY_VERSION="0.60.0"
+      ACR_LOGIN_SERVER=$(az acr show --name $(REGISTRY) --query "loginServer" -o tsv)
+      IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
+      
+      docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd):/work" \
+        aquasec/trivy:${TRIVY_VERSION} image \
+        --severity CRITICAL,HIGH --format json --output /work/trivy-report.json \
+        "$IMAGE_PATH"
+    displayName: 'Trivy Vulnerability Scan'
 
-          echo "Building image ${IMAGE_PATH}:$(Build.BuildId)..."
-          docker build -f src/Web/Dockerfile \
-            -t "${IMAGE_PATH}:$(Build.BuildId)" \
-            -t "${IMAGE_PATH}:latest" \
-            .
+  # 11. ARTIFACT PUBLICATION
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Security Reports'
+    inputs:
+      pathToPublish: 'reports/'
+      artifactName: 'security-reports'
+    condition: always()
 
-          echo "Pushing image tags..."
-          docker push "${IMAGE_PATH}:$(Build.BuildId)"
-          docker push "${IMAGE_PATH}:latest"
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish build artifacts'
+    inputs:
+      pathToPublish: '$(Build.ArtifactStagingDirectory)'
+      artifactName: 'build'
 
-          echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
-          echo "Pushed ${IMAGE_PATH}:$(Build.BuildId) and latest"
 
-- stage: Image_Scanning
-  displayName: Container Image Vulnerability Scan
-  dependsOn: Build_and_Push_Image
-  condition: succeeded()
-  jobs:
-  - job: TrivyScan
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: AzureCLI@2
-      displayName: 'Scan image with Trivy'
-      inputs:
-        azureSubscription: $(AZURE_SERVICE_CONNECTION)
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          set -euo pipefail
 
-          ACR_NAME="$(REGISTRY)"
-          if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
-            ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
-          fi
 
-          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
-            echo "No Azure Container Registry found in resource group $(RESOURCE_GROUP)."
-            exit 1
-          fi
 
-          ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
-          IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
 
-          echo "Getting ACR refresh token for Docker login..."
-          ACR_REFRESH_TOKEN=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
 
-          echo "Logging Docker into ${ACR_LOGIN_SERVER}..."
-          docker login "$ACR_LOGIN_SERVER" \
-            --username "00000000-0000-0000-0000-000000000000" \
-            --password "$ACR_REFRESH_TOKEN"
 
-          echo "Pulling image ${IMAGE_PATH}..."
-          docker pull "$IMAGE_PATH"
 
-          TRIVY_VERSION="0.60.0"
-          echo "Running Trivy ${TRIVY_VERSION} in Docker..."
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$(pwd):/work" \
-            aquasec/trivy:${TRIVY_VERSION} image \
-            --severity CRITICAL,HIGH \
-            --exit-code 0 \
-            --format json \
-            --output /work/trivy-report.json \
-            "$IMAGE_PATH"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   - task: PublishCodeCoverageResults@1
+#     displayName: 'Publish code coverage'
+#     inputs:
+#       codeCoverageTool: Cobertura
+#       summaryFileLocation: '$(Agent.TempDirectory)/**/*coverage.cobertura.xml'
+
+# - stage: Static_Analysis
+#   displayName: Code Quality & SAST
+#   dependsOn: Test_and_Coverage
+#   condition: succeeded()
+#   jobs:
+#   - job: SonarCloud
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - task: UseDotNet@2
+#       displayName: 'Use .NET $(DOTNET_VERSION)'
+#       inputs:
+#         version: $(DOTNET_VERSION)
+
+#     - task: SonarCloudPrepare@3
+#       displayName: 'SonarCloud prepare'
+#       inputs:
+#         SonarCloud: '$(SONARCLOUDCONNECTION)'
+#         organization: '$(SONARCLOUD_ORG)'
+#         scannerMode: "dotnet"
+#         projectKey: '$(SONARCLOUD_PROJECT_KEY)'
+#         projectName: '$(SONARCLOUD_PROJECT_NAME)'
+
+#     - task: DotNetCoreCLI@2
+#       displayName: 'Build for analysis'
+#       inputs:
+#         command: build
+#         projects: '**/*.csproj'
+#         arguments: '--configuration Release'
+
+#     - task: SonarCloudAnalyze@3
+#       displayName: 'SonarCloud analyze'
+
+   
+
+
+# - stage: Infra_Validation
+#   displayName: IaC Linting & Policy Check
+#   dependsOn: Static_Analysis
+#   condition: succeeded()
+#   jobs:
+#   - job: BicepLint
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+    
+
+#     - task: AzureCLI@2
+#       displayName: 'Validate Bicep against Azure Policy'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           # Run what-if to validate compliance
+#           az deployment group what-if \
+#             --resource-group $(RESOURCE_GROUP) \
+#             --template-file infra/main.bicep \
+#             --parameters infra/main.parameters.json \
+#             || echo "Policy validation warnings (non-blocking)"
+
+# - stage: Dependency_Scanning
+#   displayName: Dependency & Vulnerability Scan
+#   dependsOn: Infra_Validation
+#   condition: succeeded()
+#   jobs:
+#   - job: DependencyCheck
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - task: Cache@2
+#       displayName: 'Cache Dependency-Check NVD data'
+#       inputs:
+#         key: 'dependency-check | "$(Agent.OS)" | "12.1.0"'
+#         restoreKeys: |
+#           dependency-check | "$(Agent.OS)"
+#         path: '$(Pipeline.Workspace)/dependency-check-data'
+
+#     - task: CmdLine@2
+#       displayName: 'Install OWASP Dependency-Check'
+#       inputs:
+#         script: |
+#           set -euo pipefail
+#           DC_VERSION="12.1.0"
+#           curl -sSL "https://github.com/jeremylong/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip" -o dependency-check.zip
+#           unzip -q dependency-check.zip
+#           chmod +x dependency-check/bin/dependency-check.sh
+
+#     - task: CmdLine@2
+#       displayName: 'Scan NuGet dependencies'
+#       inputs:
+#         script: |
+#           set -euo pipefail
+#           mkdir -p reports
+#           mkdir -p "$(Pipeline.Workspace)/dependency-check-data"
+#           chmod -R 700 "$(Pipeline.Workspace)/dependency-check-data"
+#           if [ -z "$MY_NVD_KEY" ]; then
+#             echo "MY_NVD_KEY is not set. Add it as a secret variable in your variable group."
+#             exit 1
+#           fi
+#           ./dependency-check/bin/dependency-check.sh \
+#             --project eShopOnWeb \
+#             --scan src \
+#             --format JSON \
+#             --out reports/ \
+#             --data "$(Pipeline.Workspace)/dependency-check-data" \
+#             --nvdApiKey "$MY_NVD_KEY" \
+#             --disableOssIndex
+#           cat reports/dependency-check-report.json
+#       env:
+#         MY_NVD_KEY: $(NVDAPIKEY) # Maps the Key Vault secret to a shell variable
+
+#     - task: PublishBuildArtifacts@1
+#       displayName: 'Publish scan results'
+#       inputs:
+#         pathToPublish: 'reports/'
+#         artifactName: 'dependency-reports'
+#       condition: always()
+
+# - stage: Build_and_Push_Image
+#   displayName: Build and Push Docker Image
+#   dependsOn: Dependency_Scanning
+#   condition: succeeded()
+#   jobs:
+#   - job: DockerBuild
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     # - task: AzureResourceManagerTemplateDeployment@3
+#     #   displayName: 'Deploy ACR using Bicep (if needed)'
+#     #   inputs:
+#     #     deploymentScope: 'Resource Group'
+#     #     azureResourceManagerConnection: $(AZURE_SERVICE_CONNECTION)
+#     #     subscriptionId: $(SUBSCRIPTION_ID)
+#     #     action: 'Create Or Update Resource Group'
+#     #     resourceGroupName: '$(RESOURCE_GROUP)'
+#     #     location: '$(LOCATION)'
+#     #     templateLocation: 'Linked artifact'
+#     #     csmFile: 'infra/acr.bicep'
+#     #     deploymentMode: 'Incremental'
+#     #     deploymentOutputs: 'outputJson'
+
+#     - task: AzureCLI@2
+#       displayName: 'Build and push Docker image to ACR'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           set -euo pipefail
+
+#           ACR_NAME="$(REGISTRY)"
+#           RESOURCE_GROUP="$(RESOURCE_GROUP)"
+
+#           echo "Checking for ACR: $ACR_NAME..."
+
+#           # 2. Fallback to listing if the specific name still isn't found
+#           if ! az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+#             echo "Configured ACR '$ACR_NAME' not found. Using first ACR in resource group $RESOURCE_GROUP..."
+#             ACR_NAME=$(az acr list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+#           fi
+
+#           if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+#             echo "No Azure Container Registry found in resource group $RESOURCE_GROUP."
+#             exit 1
+#           fi
+
+#           # 3. Get Login Server and Login
+#           ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query "loginServer" -o tsv)
+
+#           IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO)"
+
+#           echo "Logging into ACR ${ACR_NAME}..."
+#           az acr login --name "$ACR_NAME"
+
+#           echo "Building image ${IMAGE_PATH}:$(Build.BuildId)..."
+#           docker build -f src/Web/Dockerfile \
+#             -t "${IMAGE_PATH}:$(Build.BuildId)" \
+#             -t "${IMAGE_PATH}:latest" \
+#             .
+
+#           echo "Pushing image tags..."
+#           docker push "${IMAGE_PATH}:$(Build.BuildId)"
+#           docker push "${IMAGE_PATH}:latest"
+
+#           echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
+#           echo "Pushed ${IMAGE_PATH}:$(Build.BuildId) and latest"
+
+# - stage: Image_Scanning
+#   displayName: Container Image Vulnerability Scan
+#   dependsOn: Build_and_Push_Image
+#   condition: succeeded()
+#   jobs:
+#   - job: TrivyScan
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - task: AzureCLI@2
+#       displayName: 'Scan image with Trivy'
+#       inputs:
+#         azureSubscription: $(AZURE_SERVICE_CONNECTION)
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           set -euo pipefail
+
+#           ACR_NAME="$(REGISTRY)"
+#           if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
+#             ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
+#           fi
+
+#           if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+#             echo "No Azure Container Registry found in resource group $(RESOURCE_GROUP)."
+#             exit 1
+#           fi
+
+#           ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" --query "loginServer" -o tsv)
+#           IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO):$(Build.BuildId)"
+
+#           echo "Getting ACR refresh token for Docker login..."
+#           ACR_REFRESH_TOKEN=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+
+#           echo "Logging Docker into ${ACR_LOGIN_SERVER}..."
+#           docker login "$ACR_LOGIN_SERVER" \
+#             --username "00000000-0000-0000-0000-000000000000" \
+#             --password "$ACR_REFRESH_TOKEN"
+
+#           echo "Pulling image ${IMAGE_PATH}..."
+#           docker pull "$IMAGE_PATH"
+
+#           TRIVY_VERSION="0.60.0"
+#           echo "Running Trivy ${TRIVY_VERSION} in Docker..."
+#           docker run --rm \
+#             -v /var/run/docker.sock:/var/run/docker.sock \
+#             -v "$(pwd):/work" \
+#             aquasec/trivy:${TRIVY_VERSION} image \
+#             --severity CRITICAL,HIGH \
+#             --exit-code 0 \
+#             --format json \
+#             --output /work/trivy-report.json \
+#             "$IMAGE_PATH"
           
-          cat trivy-report.json
+#           cat trivy-report.json
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish Trivy scan results'
-      inputs:
-        pathToPublish: 'trivy-report.json'
-        artifactName: 'trivy-reports'
-      condition: always()
+#     - task: PublishBuildArtifacts@1
+#       displayName: 'Publish Trivy scan results'
+#       inputs:
+#         pathToPublish: 'trivy-report.json'
+#         artifactName: 'trivy-reports'
+#       condition: always()
     
