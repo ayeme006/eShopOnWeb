@@ -195,6 +195,9 @@ jobs:
       inlineScript: |
         set -euo pipefail
 
+        # 1. PRE-CREATE the directory on the agent host
+        mkdir -p "$(pwd)/reports"
+
         ACR_NAME="$(REGISTRY)"
         if ! az acr show --name "$ACR_NAME" --resource-group "$(RESOURCE_GROUP)" >/dev/null 2>&1; then
           ACR_NAME=$(az acr list --resource-group "$(RESOURCE_GROUP)" --query "[0].name" -o tsv)
@@ -223,27 +226,27 @@ jobs:
         echo "Running Trivy ${TRIVY_VERSION} in Docker..."
         docker run --rm \
           -v /var/run/docker.sock:/var/run/docker.sock \
-          -v "$(pwd):/work" \
+          -v "$(pwd)/reports:/reports" \
           aquasec/trivy:${TRIVY_VERSION} image \
           --severity CRITICAL,HIGH \
           --exit-code 0 \
           --format json \
-          --output /work/trivy-report.json \
+          --output /reports/trivy-report.json \
           "$IMAGE_PATH"
         
         if command -v jq &> /dev/null; then
             echo "##[group]Trivy Scan Summary"
-            jq '.Results[] | {Target: .Target, Vulnerabilities: .Vulnerabilities | length}' reports/trivy-report.json
+            jq '.Results[] | {Target: .Target, Vulnerabilities: (.Vulnerabilities // [] | length)}' "$(pwd)/reports/trivy-report.json"
             echo "##[endgroup]"
           else
-            echo "Trivy scan complete. Report saved to reports/trivy-report.json"
+            echo "Trivy scan complete. Report saved to $(pwd)/reports/trivy-report.json"
           fi
 
   # 11. ARTIFACT PUBLICATION
   - task: PublishBuildArtifacts@1
     displayName: 'Publish Security Reports'
     inputs:
-      pathToPublish: 'reports/'
+      pathToPublish: '$(System.DefaultWorkingDirectory)/reports'
       artifactName: 'security-reports'
     condition: always()
 
