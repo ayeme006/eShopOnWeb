@@ -148,41 +148,42 @@ jobs:
       inlineScript: |
         set -euo pipefail
 
-          ACR_NAME="$(REGISTRY)"
-          RESOURCE_GROUP="$(RESOURCE_GROUP)"
+        ACR_NAME="$(REGISTRY)"
+        RESOURCE_GROUP="$(RESOURCE_GROUP)"
 
-          echo "Checking for ACR: $ACR_NAME..."
+        echo "Checking for ACR: $ACR_NAME..."
 
-          # 2. Fallback to listing if the specific name still isn't found
-          if ! az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
-            echo "Configured ACR '$ACR_NAME' not found. Using first ACR in resource group $RESOURCE_GROUP..."
-            ACR_NAME=$(az acr list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
-          fi
+        if ! az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+          echo "Configured ACR '$ACR_NAME' not found. Using first ACR in resource group $RESOURCE_GROUP..."
+          ACR_NAME=$(az acr list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+        fi
 
-          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
-            echo "No Azure Container Registry found in resource group $RESOURCE_GROUP."
-            exit 1
-          fi
+        if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+          echo "No Azure Container Registry found in resource group $RESOURCE_GROUP."
+          exit 1
+        fi
 
-          # 3. Get Login Server and Login
-          ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query "loginServer" -o tsv)
+        ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query "loginServer" -o tsv)
 
-          IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO)"
+        IMAGE_PATH="${ACR_LOGIN_SERVER}/$(IMAGE_REPO)"
 
-          echo "Logging into ACR ${ACR_NAME}..."
-          az acr login --name "$ACR_NAME"
-        
-        # Optimization: Pull latest image as cache source
-        docker pull "${IMAGE_PATH}:latest" || true
-        
-        docker build --cache-from "${IMAGE_PATH}:latest" \
-          -f src/Web/Dockerfile \
-          -t "${IMAGE_PATH}:$(Build.BuildId)" \
-          -t "${IMAGE_PATH}:latest" .
-        
-        docker push "${IMAGE_PATH}:$(Build.BuildId)"
-        docker push "${IMAGE_PATH}:latest"
-        
+        echo "Logging into ACR ${ACR_NAME}..."
+        az acr login --name "$ACR_NAME"
+
+        export DOCKER_BUILDKIT=1
+
+        # 4. Optimized Build & Push
+        # Using buildx allows us to push and cache-from simultaneously
+        echo "Starting optimized build with Inline Caching..."
+
+        docker buildx build \
+        --cache-from "${IMAGE_PATH}:latest" \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -f src/Web/Dockerfile \
+        -t "${IMAGE_PATH}:$(Build.BuildId)" \
+        -t "${IMAGE_PATH}:latest" \
+        --push .
+      
         echo "##vso[task.setvariable variable=acrLoginServer;]$ACR_LOGIN_SERVER"
   
   # 10. CONTAINER IMAGE SCANNING (Trivy)
@@ -241,7 +242,7 @@ jobs:
           else
             echo "Trivy scan complete. Report saved to $(pwd)/reports/trivy-report.json"
           fi
-
+  
   # 11. ARTIFACT PUBLICATION
   - task: PublishBuildArtifacts@1
     displayName: 'Publish Security Reports'
